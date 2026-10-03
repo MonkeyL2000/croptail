@@ -16,6 +16,7 @@
 | 自检场景 | `res://scenes/dev/selftest.tscn`(**逻辑改动的验收口**) |
 | 截图工具 | `res://scenes/dev/screenshot.tscn` → `res://screenshots/shot_*.png` |
 | 地形整图 | `python tools/render_map.py docs/art/map.png`(离线合成,看草坪对不对看这张) |
+| 动作版式图 | `python tools/annotate_actions.py` → `docs/art/actions_groups.png`(3 个动作组 x 4 个朝向,人工核对用) |
 | 地形图块重算 | `res://scenes/dev/retile.tscn`(改了地图形状后要跑;先自校验参考图) |
 | 地图速览 | `res://scenes/dev/map_dump.tscn`(打 ASCII 地图) |
 | autoload | `GameState`=`res://scripts/core/game_state.gd`,`TimeManager`=`res://scripts/core/time_manager.gd` |
@@ -62,14 +63,24 @@
   - **图标**:`scripts/ui/tool_icons.gd` 重写。根因是 `Tools.png` 并非「6 种工具」,
     而是「3 种工具 x 6 个朝向」—— 旧表从一个工具组里挑了 3 格,所以 4 个图标里
     3 个长得一样。现在一个工具取一整组,第 4 个(收获)取**成熟作物**的贴图。
-  - **动画**:`Basic Charakter Actions.png` 的一帧不是「一列」而是 **2x2 块**
-    (图只有 96 宽),旧生成器去取 x=96/144 已经**出了图界**,每个 `use_*` 的第 3、4 帧是空的。
-    `tools/gen_player_scene.py` 重生成 `player.tscn`,24 个动画 / 80 张 AtlasTexture。
-    锄头/水壶/种子/收获各一套动作,和朝向正交。
+  - **动画**:`Basic Charakter Actions.png` 是 **2 列 x 12 行** = 3 个动作 x 4 个朝向,
+    **一行(2 帧)= 一个动作的一个朝向**。`tools/gen_player_scene.py` 重生成
+    `player.tscn`,24 个动画 / 48 张 AtlasTexture。锄头/水壶/种子/收获各一套动作,和朝向正交。
   - 工具条图标跟随当前工具高亮;收获图标跟随当前作物变(`GameState.crop_changed`)
-- [x] **2026-10-03 自检场景扩到 128 项断言**,新增覆盖:道具撒点/可达性、树真的挡住人、
-      每个 `use_*` 帧矩形在贴图内、四个工具图标逐像素不同、
-      HUD 字体/字号/行高、以及**读一帧真实画面**量 DayLabel 墨迹有没有被裁
+- [x] **2026-10-03 修复「锄地/收割/浇水的动作会朝两边施放」** —— 用户指出后查出来的
+  - **根因**:上一轮把 `行 2b, 2b+1` 两行当成「一个动作的 4 帧」,于是
+    ① `use_*_left` 和 `use_*_right` 拿到**同一对行 = 同一个动画**(左右一样),
+    ② 一个动画里左一帧、右一帧交替 —— 就是「朝两边施放」。
+  - **真版式**:2 列 = 两帧,12 行 = 3 个动作 x 4 个朝向(组内顺序同立绘表:前/后/左/右)。
+    证据链写在 `docs/DECISIONS.md#action-blocks`(镜像对、头部轮廓、脸上的肤色像素);
+    对照图 `docs/art/actions_groups.png`(`python tools/annotate_actions.py`)。
+  - 现在 `use_N_*` 每个动画只取自**一行**,2 帧;`TOOL_ACTION` 改成给组起始行。
+    动作分配:锄头 A(头顶抡下)/ 收割 B(体侧扫下)/ 洒水壶 C(纯金属、身前低位)/ 种子借 B。
+  - **新增 4 条回归**:动画不跨行、同一工具四个朝向占四行不同行、
+    左帧是右帧的逐像素镜像、前视图有脸/后视图没有。
+- [x] **2026-10-03 自检场景扩到 137 项断言**,新增覆盖:道具撒点/可达性、树真的挡住人、
+      每个 `use_*` 帧矩形在贴图内、动画不跨行且四个朝向占四行、左/右帧逐像素镜像、
+      四个工具图标逐像素不同、HUD 字体/字号/行高、以及**读一帧真实画面**量 DayLabel 墨迹有没有被裁
 - [x] **2026-10-03 修复「草坪全是错的」** —— 用户指出后查出来的
   - **根因**:地图形状是脚本刷的,刷的时候**每一格都写了同一个 atlas 坐标**(左上角块)。
     而「该画哪一块」由 TileSet 的 terrain(peering)决定:内部用 `(1,1)`,四条边各一块,
@@ -115,17 +126,25 @@
   `Tools.png` 里「哪组是锄头」也是推断 —— 两处都有对照图可人工核对:
   `docs/art/plants_sheet.png`、`docs/art/tools_sheet.png`(`tools/annotate_sheet.py` 生成)。
 - 杂草 / 石头会挡农田的格子 —— 现在 `FarmCell` 没有「障碍物」概念,以后加野草要顺手加这一位。
+- ⚠️ **待确认**:种子图标取的是 `Tools.png` 行 4,但那一行的像素是「木件 + 金属箍」,
+  不像种子袋(见 `DECISIONS.md#tools-sheet` 的表)。四个图标确实互不相同,需求已满足;
+  但若找到真正的种子袋素材(也许在 `Objects/Basic_tools_and_meterials.png` 里),应该换过去。
 - 角色动画是一整块图集切出来的,没有图例。改 `tools/gen_player_scene.py` 之后
   **必须**跑一次 `launch_editor` 重新导入,否则看的是旧缓存(见 `DECISIONS.md#reimport`)。
+- 自检里**合成按键不可靠**(会时灵时不灵),验物理的用例不要依赖它;
+  另有「格坐标跨节点混用」的坑 —— 见 `DECISIONS.md#synthetic-input`、`#frame-mixing`。
 - 没有音频素材(原包里就没有)。
 
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
-  → **`=== SELFTEST END: 134 checks, 0 failed ===`**,ERROR 区为空。关键几条:
+  → **`=== SELFTEST END: 137 checks, 0 failed ===`**,连跑 4 次都 0 failed,ERROR 区为空。关键几条:
+  - `each direction of a tool uses its own atlas row` —— 「朝两边挥」那个 bug 的回归
+  - `left frames are the exact mirror of the right frames (8 frames)`
+  - `front action frames show the face, back frames do not`
   - `grass tiles match the TileSet's own terrain peering`(拿引擎当标准答案逐格比)
   - `a fully surrounded cell uses the interior tile`(`(1,1)`)
-  - `water wall is flush with the shore (within 1px)`(岸边实测 草沿 -264,玩家 -259)
+  - `water wall is flush with the shore (within 1px)`(岸边实测 草沿 -264,玩家 -259,**零抖动**)
   - 字体探针 `'D' 墨迹在 Label 内的行 3..11`、`DayLabel rect y 4..19, ink rows 7..18`
 - `scripts/dev/retile.gd` → **`REFERENCE CHECK: PASS`**(263 格标准答案 0 差异)
 - `python tools/render_map.py docs/art/map.png` → 1152x736 整张地形图;

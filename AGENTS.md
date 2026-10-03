@@ -46,6 +46,7 @@
 | `gen_pixel_font.py` | 生成 `game_source/font/sprout_ui.{png,fnt}` + `docs/art/font_preview.png` |
 | `gen_player_scene.py` | 重新生成 `scenes/characters/player.tscn`(24 个动画 + Camera2D) |
 | `annotate_sheet.py` | 给图集画格线存到 `docs/art/`,方便人工核对格子含义 |
+| `annotate_actions.py` | 把 `Basic Charakter Actions.png` 的版式(3 个动作组 x 4 个朝向)框出来标好,存 `docs/art/actions_groups.png` |
 | `annotate_terrain.py` | 把 TileSet 的 peering 信息画到图集上(`docs/art/terrain_*.png`):每格右上角一个九宫格,填色 = 那个方向也是同种地面 |
 | `render_map.py` | 离线把 `farm_map.tscn` 的地形层合成成一张整图(`docs/art/map.png`)。**看草坪对不对看这张**,不要在游戏里对着一小块猜 |
 | `extract_props.py` | 连通域分析道具图集(只是**建议**,权威表在 `prop_db.gd`) |
@@ -77,6 +78,17 @@
   否则新格子全是同一个角块(踩过:整片草坪铺满左上角块,见 DECISIONS#grass-terrain)。
 - **每个 `TileMapLayer` 自己的 `position` 不同**(water 在 (0,0)、grass 在 (-8,-5)),
   所以**两层的格坐标不能直接运算** —— 它们差半格。要比就先换算成世界坐标。
+  `FarmProps` 在 (0,0),与 grass 层也差半格:拿 grass 的格号去查 `FarmProps` 的
+  格子集合会选到**差 8px 的另一格**(踩过:自检跑到树里,玩家一步都动不了)。
+  统一入口:`FarmProps.to_local_cell(global_point)` / `cell_center(cell)`。
+- **动作图集一行 = 一个朝向的 2 帧**,不要把相邻两行当成「一个动作的 4 帧」:
+  `Basic Charakter Actions.png` 是 2 列 x 12 行 = 3 个动作 x 4 个朝向(前/后/左/右),
+  弄错会让左右两套动画变成同一个、顺便「朝两边挥」(踩过两次,见 DECISIONS#action-blocks)。
+  版式对照图:`python tools/annotate_actions.py` → `docs/art/actions_groups.png`。
+- **自检里不要依赖合成按键**(`Input.action_press` 会时灵时不灵:状态机还在 idle,
+  玩家一步不动 —— 那才是「偶发失败」的真正来源)。验碰撞就自己给 `velocity` +
+  `move_and_slide()`;验输入就等条件(等到真的动了)并设上限,别写死等 N 帧。
+  见 DECISIONS#synthetic-input。
 - **改 `scenes/`/`scripts/` 的排版或字体后,看画面用**
   `run_project {scene: "res://scenes/dev/screenshot.tscn"}`(存到 `res://screenshots/`);
   看整张地形对不对用 `python tools/render_map.py docs/art/map.png`;

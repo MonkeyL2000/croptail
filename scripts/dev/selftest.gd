@@ -168,8 +168,12 @@ func _test_movement() -> void:
 	print("-- movement")
 	var start := player.global_position
 	Input.action_press("walk_left")
-	for i in 6:
+	# 等到真的动了为止(最多 60 物理帧)。合成按键不保证当帧生效 —— 实测有过整只
+	# 玩家一步不动的情况,原来写死等 6 帧就报 FAIL。等条件而不是等帧数。
+	var waited := 0
+	while player.global_position.x >= start.x and waited < 60:
 		await get_tree().physics_frame
+		waited += 1
 	check("player moved left", player.global_position.x < start.x)
 	check("facing is left", player.facing == Vector2.LEFT)
 	check("walk state active while pressed",
@@ -240,8 +244,62 @@ func _test_tool_art() -> void:
 		frames.get_frame_texture("use_1_front", 0) != frames.get_frame_texture("use_2_front", 0))
 	check("use animations are distinct per direction",
 		frames.get_frame_texture("use_1_front", 0) != frames.get_frame_texture("use_1_left", 0))
-	check("each use animation has 4 frames",
-		frames.get_frame_count("use_1_front") == 4 and frames.get_frame_count("use_3_left") == 4)
+	check("each use animation has 2 frames (one atlas row = one direction)",
+		frames.get_frame_count("use_1_front") == 2 and frames.get_frame_count("use_3_left") == 2)
+
+	# 「挥到两边」那个 bug 的回归测试。动作图集一行 = 一个朝向的两帧;
+	# 旧的错法把 2b、2b+1 两行当成「一个动作的 4 帧」,于是 use_*_left 和 use_*_right
+	# 拿到同一对行 = 同一个动画,里左一帧右一帧交替。
+	# 断言:①一个动画只能来自一行 ②同一工具的四个朝向必须落在四行不同的行上。
+	var row_report: Array[String] = []
+	for tool in tool_ids:
+		var used_rows: Array[int] = []
+		for direction in ["front", "back", "left", "right"]:
+			var anim_name := "use_%d_%s" % [tool + 1, direction]
+			var anim_rows: Array[int] = []
+			for index in frames.get_frame_count(anim_name):
+				var row := _atlas_row(frames.get_frame_texture(anim_name, index))
+				if not anim_rows.has(row):
+					anim_rows.append(row)
+			if anim_rows.size() != 1:
+				row_report.append("%s spans rows %s" % [anim_name, anim_rows])
+			elif used_rows.has(anim_rows[0]):
+				row_report.append("%s reuses row %d" % [anim_name, anim_rows[0]])
+			else:
+				used_rows.append(anim_rows[0])
+	check("each direction of a tool uses its own atlas row", row_report.is_empty())
+	for line in row_report:
+		print("      ", line)
+
+	# 图集里左/右两行本来就是精确镜像的一对,那就逐帧比像素 —— 只要动画里混了朝向,
+	# 这里就不会全等。(比行号更直接:证明画出来的确实是同一个朝向。)
+	var mirror_ok := true
+	var mirrored_frames := 0
+	for tool in tool_ids:
+		var left := "use_%d_left" % [tool + 1]
+		var right := "use_%d_right" % [tool + 1]
+		for index in frames.get_frame_count(left):
+			var a := _frame_image(frames.get_frame_texture(left, index))
+			var b := _frame_image(frames.get_frame_texture(right, index))
+			if a == null or b == null:
+				mirror_ok = false
+				continue
+			mirrored_frames += 1
+			if not _is_mirror(a, b):
+				mirror_ok = false
+				print("      %s frame %d is not the mirror of %s" % [left, index, right])
+	check("left frames are the exact mirror of the right frames (%d frames)" % mirrored_frames,
+		mirror_ok and mirrored_frames == 8)
+
+	# 前/后不能接反:靠脸 —— 立绘表里只有前视图的头部有肤色像素(实测每行 5~8 颗,
+	# 后视图 0 颗)。行 4a 应当是前、4a+1 应当是后。
+	var front_skin := 0
+	var back_skin := 0
+	for tool in tool_ids:
+		front_skin += _skin_pixels("use_%d_front" % [tool + 1])
+		back_skin += _skin_pixels("use_%d_back" % [tool + 1])
+	check("front action frames show the face, back frames do not",
+		front_skin >= 12 and back_skin == 0)
 	check("idle still has 2 frames", frames.get_frame_count("idle_front") == 2)
 
 	# 这是曾经的真 bug:Actions 图集只有 96 宽,动画却去取 x=96/144 ——
@@ -262,6 +320,67 @@ func _test_tool_art() -> void:
 
 	# HUD 用的位图字体能在运行时加载
 	check("HUD has the pixelfont resource", load("res://game_source/font/sprout_ui.fnt") != null)
+
+
+## 某一帧落在图集的第几行(格子是 48x48)
+func _atlas_row(texture: Texture2D) -> int:
+	var atlas := texture as AtlasTexture
+	if atlas == null:
+		return -1
+	return floori(atlas.region.position.y / 48.0)
+
+
+## 把一帧的像素从图集里裁出来(取不到就返回 null)
+func _frame_image(texture: Texture2D) -> Image:
+	var atlas := texture as AtlasTexture
+	if atlas == null or atlas.atlas == null:
+		return null
+	var sheet := atlas.atlas.get_image()
+	if sheet == null:
+		return null
+	if sheet.is_compressed():
+		sheet.decompress()
+	return sheet.get_region(Rect2i(atlas.region))
+
+
+## a 与「左右翻转后的 b」是不是同一张图。
+##
+## 不能直接比 get_data():导入器开着 process/fix_alpha_border(见 .png.import),
+## 它会把**全透明**像素的 RGB 抹成邻居颜色,免得缩放出黑边 —— 而那个抹痕对镜像
+## 并不对称,比原始字节能比出假差异。(踩过:6 对帧实际 0 像素差异,却报了 3 个 FAIL。)
+## 所以只比 alpha 蒙版 + **不透明**像素的颜色。
+func _is_mirror(a: Image, b: Image) -> bool:
+	if a.get_size() != b.get_size():
+		return false
+	var flipped: Image = b.duplicate()
+	flipped.flip_x()
+	for y in a.get_height():
+		for x in a.get_width():
+			var ca := a.get_pixel(x, y)
+			var cb := flipped.get_pixel(x, y)
+			var opacity := ca.a > 0.5
+			if opacity != (cb.a > 0.5):
+				return false
+			if opacity and not ca.is_equal_approx(cb):
+				return false
+	return true
+
+
+## 头部区域(x16..32, y13..24)里肤色像素的个数 = 「有没有脸」。
+## 前视图 5~8 颗,后视图 0 颗;侧视图 4 颗(从实测得来,不是猜的)。
+func _skin_pixels(anim_name: String) -> int:
+	var frames := player.animated_sprite.sprite_frames
+	var image := _frame_image(frames.get_frame_texture(anim_name, 0))
+	if image == null:
+		return -1
+	var skin := Color8(232, 181, 172)
+	var found := 0
+	for y in range(13, 25):
+		for x in range(16, 33):
+			var c := image.get_pixel(x, y)
+			if absf(c.r - skin.r) < 0.02 and absf(c.g - skin.g) < 0.02 and absf(c.b - skin.b) < 0.02:
+				found += 1
+	return found
 
 
 ## 两张图标贴图是不是同一片美术(比像素,不比资源对象)
@@ -352,19 +471,26 @@ func _test_main_scene() -> void:
 
 	# 走到草岛的左边往水里推,应该被正好在岸边的水墙挡住。
 	#
-	# **出发格不能写死坐标,也不能只看「左边连着几格是空地」**:道具是按格子随机
-	# 撒的,写死的点随时可能落进某棵树里;而只看「连着几格空」也不够 ——
-	# 那几格尽头可能是棵树,量到的就成了树的位置,不是墙的位置(两种都踩过)。
-	#
-	# 所以要找这样的**一行**:从岛的最左一格开始往右,连着好几格都空而且走得到。
-	# 这样玩家一路往左,左边除了水墙再没有别的东西挡他。
+	# 三个坑(都踩过):
+	#  1. 出发格不能写死坐标 —— 道具按格子随机撒。
+	#  2. 而且「左边连着几格空」必须用 **Props 自己的格坐标系**去问 walkable:
+	#     grass 层有 (-8,-5) 的 position 偏移,同一组格号在两层里差半格,
+	#     拿 grass 的格号查 Props 的格子集合 = 选到一格背后靠着树的位置,
+	#     玩家一步都动不了(实测停在 x=-216 而不是期望的 -259)。
+	#     游戏代码里 farm_props.gd::_layer_cells() 转过,这里也必须转。
+	#  3. 走到停为止,别写死等几帧。
 	var grass_layer: TileMapLayer = map.get_node("GameTilemap/grass")
 	var leftmost_of_row := {}
 	for cell in grass_layer.get_used_cells():
-		leftmost_of_row[cell.y] = mini(int(leftmost_of_row.get(cell.y, 1 << 30)), cell.x)
+		var world: Vector2 = grass_layer.to_global(grass_layer.map_to_local(cell))
+		var prop_cell := main_props.to_local_cell(world)
+		leftmost_of_row[prop_cell.y] = mini(int(leftmost_of_row.get(prop_cell.y, 1 << 30)), prop_cell.x)
 
+	# 行的顺序固定下来:字典遍历顺序会变,不然每次跑选到不同的一行,像偶发
+	var rows: Array = leftmost_of_row.keys()
+	rows.sort()
 	var start_cell := Vector2i(-999, -999)
-	for y in leftmost_of_row:
+	for y in rows:
 		var run := 0
 		while walkable.has(Vector2i(int(leftmost_of_row[y]) + run, int(y))):
 			run += 1
@@ -375,10 +501,17 @@ func _test_main_scene() -> void:
 
 	main_player.global_position = main_props.cell_center(start_cell)
 	var start_x := main_player.global_position.x
-	Input.action_press("walk_left")
+
+	# 这里验的是**水墙碰撞**,不是输入。所以直接每物理帧给一下速度 + move_and_slide,
+	# 不靠 Input.action_press —— 合成按键在这个环境里时灵时不灵(实测偶尔整只
+	# 玩家一步不动、状态还停在 idle),那就是「偶发 FAIL」的真正来源。
+	# 输入→行走 由 _test_movement() 负责,两边各管一件事。
+	(main_player.get_node("StateMachine") as NodeFiniteStateMachine).on_state_transition("idle")
 	for i in 90:
 		await get_tree().physics_frame
-	Input.action_release("walk_left")
+		main_player.velocity = Vector2.LEFT * Player.SPEED
+		main_player.move_and_slide()
+	main_player.velocity = Vector2.ZERO
 	check("player moved towards the shore", main_player.global_position.x < start_x)
 
 	# 水墙要**正好贴着**草地的左沿。玩家脚下是个半径 5 的碰撞圆(见
@@ -692,7 +825,15 @@ func _test_grass_terrain(map: Node) -> void:
 ## 分不清就只能瞎改,所以直接把附近的都打出来。
 func _dump_shore(main: Node, props: FarmProps, walker: Player) -> void:
 	var cell: Vector2i = props.to_local_cell(walker.global_position)
-	print("      玩家停在格 %s (x=%.1f y=%.1f)" % [cell, walker.global_position.x, walker.global_position.y])
+	var machine := walker.get_node("StateMachine") as NodeFiniteStateMachine
+	print("      玩家停在格 %s (x=%.1f y=%.1f) 状态=%s 速度=%s 动画=%s" % [cell,
+		walker.global_position.x, walker.global_position.y, machine.current_state_name,
+		walker.velocity, walker.animated_sprite.animation])
+	# 停下来的原因:最后那次 move_and_slide 撞到了谁
+	for i in walker.get_slide_collision_count():
+		var hit := walker.get_slide_collision(i)
+		var collider := hit.get_collider() as Node
+		print("      撞到 %s 法线=%s" % [str(collider.get_path()) if collider != null else "(null)", hit.get_normal()])
 	var walls := main.get_node_or_null("FarmMap/WaterWalls")
 	if walls != null:
 		for child in walls.get_children():
