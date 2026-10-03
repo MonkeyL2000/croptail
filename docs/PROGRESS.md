@@ -34,15 +34,15 @@
 
 ## Done
 
-- [x] **2026-10-03 项目搬迁 + 分析**:从 `D:\GODOT_PROJ\croptail` 搬到 `D:\godot_projects\croptail`
-      (逐文件 md5 校验一致),`.godot/` 重新生成;完整问题清单见 git 第一个 commit 的说明。
+- [x] **2026-10-03 接手并重做玩法**:项目从 `D:\GODOT_PROJ\croptail` 搬来(逐文件 md5 校验),
+      原样导入前的问题清单见提交 `a627f7f` 的说明;搬迁时的完整分析也在那。
 - [x] **2026-10-03 修复原项目的致命问题**
   - 设主场景 `res://scenes/main.tscn`(原来没有 `run/main_scene`,F5 会弹窗)
   - `Player.player_direction` 从 `static var` 改成实例变量 `facing`(Godot 4.4 起会直接报错)
   - `NodeState.transition` 信号补上参数(原来 `emit("walk")` 会 "too many arguments" 崩掉)
-  - 去掉状态机每物理帧的 `print`(原项目控制台被刷爆)
-- [x] **2026-10-03 目录规范化**:`sence/`→`scenes/`、`script/`→`scripts/`、
-      `state_machiine/`→`state_machine/`,脚本按 core/farm/player/ui/world/dev 分层
+  - 去掉了状态机每物理帧的 `print`(原项目控制台被刷爆)
+  - **目录规范化**:`sence/`→`scenes/`、`script/`→`scripts/`、
+    `state_machiine/`→`state_machine/`,脚本按 core/farm/player/ui/world/dev 分层
 - [x] **2026-10-03 玩法骨架**:`FarmPlot`(12x7)+ `FarmCell`(土壤/湿土/作物/成熟)、
       `CropDB`(小麦、叶菜,各 4 个生长阶段)、`TimeManager`(45 秒一天,浇水才长、水会干)、
       `GameState`(工具条 / 金币 / 种子库存)
@@ -52,7 +52,10 @@
 - [x] **2026-10-03 HUD**:天数+进度 / 金币 / 工具 / 各种子数量 / 3 秒提示(全 ASCII)
 - [x] **2026-10-03 自检场景**:`scenes/dev/selftest.tscn`,62 项断言(规则 / 生长 / 图集坐标 /
       状态机 / 移动 / 主场景集成 / 水墙挡人)全绿
-- [x] **2026-10-03 项目记忆 + 仓库**:`AGENTS.md` / `docs/`、`ASSET_CREDITS.md`,推到 GitHub
+- [x] **2026-10-03 项目记忆 + 仓库**:`AGENTS.md` / `docs/` / `ASSET_CREDITS.md` / `README.md`;
+      `git init`(分支 main),推到 GitHub:**https://github.com/MonkeyL2000/croptail**(public)
+      - `a627f7f` 一次性初始化提交(搬迁后的干净版本就是初始状态,没有造「先坏后好」的假历史)
+      - `7b19659` 补 README(操作说明 / 种植循环 / 素材许可)
 
 ## Next(按顺序做)
 
