@@ -143,6 +143,25 @@ func _test_sprites() -> void:
 	check("soil sprite has atlas texture", soil_sprite.texture is AtlasTexture)
 	check("soil sprite is (16,16)", (soil_sprite.texture as AtlasTexture).region == Rect2(16, 16, 16, 16))
 
+	# 土块/作物的贴图必须**正好盖住自己那一格**。
+	#
+	# 这条抓的是 Sprite2D 默认 `centered = true` 的坑:格子的原点在左上角,
+	# 不把精灵摆到格子中心的话,16x16 的贴图会以左上角为圆心画、整块偏左上 8px ——
+	# 玩家看到的就是「锄到的格子和指示框不是同一格」(用户报过)。
+	var probe_cell := FarmCell.new()
+	probe_cell.position = Vector2(320, 96)
+	add_child(probe_cell)
+	probe_cell.configure(Vector2i(0, 0))
+	probe_cell.till()
+	var probe_soil := probe_cell.get_node("SoilSprite") as Sprite2D
+	check("a tilled cell shows its soil", probe_soil.visible)
+	check("the soil sprite covers exactly its own cell", _covers_cell(probe_soil, probe_cell))
+	probe_cell.plant(CropDB.get_crop("wheat"))
+	var probe_crop := probe_cell.get_node("CropSprite") as Sprite2D
+	check("a planted cell shows its crop", probe_crop.visible)
+	check("the crop sprite covers exactly its own cell", _covers_cell(probe_crop, probe_cell))
+	probe_cell.queue_free()
+
 
 ## 目标格:必须 = **脚下**那格 + 朝向偏移。
 ##
@@ -250,6 +269,63 @@ func _test_movement() -> void:
 ## 只比「框内 vs 框外」不够 —— 旁边那格地面本来就可能是别的颜色(草 vs 泥土)。
 ## 所以读同一格两次:一次框开着、一次把框藏起来,亮度必须有差别。
 ## 这样测的只是「框产生了像素」,与底下是什么地形无关。
+## 锄一格,然后逐像素比较前后两帧:变化的像素必须**全部**落在那格的屏幕矩形里。
+##
+## 用户报「指示器的格子和实际作用的格子不是一个格子」,根因就是土块贴图偏移了 8px
+## (见 _covers_cell 的注释)。逻辑层的断言查不出这种偏 —— 只有真看画面才知道
+## 「变色的那块地」在哪。
+func _check_soil_lands_on_its_cell(walker: Player, farm: FarmPlot) -> void:
+	var cell := Vector2i(2, 3)
+	var target := farm.get_cell(cell)
+	check("the pixel test starts from an untilled cell",
+		target != null and not target.is_tilled())
+	if target == null or target.is_tilled():
+		return
+
+	# 让相机正对这一格(相机挂在玩家上方,减掉它的局部位置就是「玩家站哪能看到这格」),
+	# 再把角色藏起来:48px 的精灵会盖住格子,而且 idle 动画自己在动。
+	walker.global_position = farm.cell_center(cell) - walker.camera.position
+	walker.camera.make_current()
+	# 相机开了平滑:传送完不 reset 的话画面还在滑,「什么都不做」的对照帧也会有差异
+	walker.camera.reset_smoothing()
+	var walker_was_visible := walker.visible
+	walker.visible = false
+	for i in 4:
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+
+	var inside := _cell_screen_rect(farm, cell)
+	var area := inside.grow(24)
+	var view := Rect2i(Vector2i.ZERO, Vector2i(get_viewport().get_visible_rect().size))
+	var on_screen := view.encloses(area)
+	check("the pixel test cell is fully on screen", on_screen)
+	if not on_screen:
+		walker.visible = walker_was_visible
+		return
+
+	var before := get_viewport().get_texture().get_image()
+	# 对照:什么都不做时这一块画面必须是静止的(水面的动画图块落在里面就会露馅)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var idle := get_viewport().get_texture().get_image()
+	check("the pixel test area is static while nothing happens",
+		_diff_count(idle, before, area) == 0)
+
+	farm.use_tool(GameState.Tool.HOE, cell, "")
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var after := get_viewport().get_texture().get_image()
+	walker.visible = walker_was_visible
+
+	var changed_inside := _diff_count(after, idle, inside)
+	var changed_area := _diff_count(after, idle, area)
+	print("      soil pixel test: %d/%d px changed inside cell %s, %d changed in the 64x64 area" % [
+		changed_inside, inside.get_area(), cell, changed_area])
+	check("tilling repaints every pixel of that cell", changed_inside == inside.get_area())
+	check("tilling repaints nothing outside that cell", changed_area == changed_inside)
+
+
 func _check_indicator_ink(indicator: Node2D, walker: Player, farm: FarmPlot) -> void:
 	if indicator == null:
 		check("the indicator draws pixels (skipped: no indicator)", true)
@@ -301,6 +377,39 @@ func _indicator_luma(farm: FarmPlot, cell: Vector2i) -> float:
 			total += image.get_pixel(px, py).get_luminance()
 			samples += 1
 	return total / float(samples) if samples > 0 else -1.0
+
+
+## 精灵画出来的矩形(世界坐标)是不是正好等于它所在那一格的矩形。
+## 用精灵自己的 global transform —— 自己手算 `get_rect() + position` 很容易漏一项
+## (第一次写这个 helper 就漏了 sprite.position,反过来冤枉了正确的代码)。
+func _covers_cell(sprite: Sprite2D, cell: FarmCell) -> bool:
+	var xform := sprite.get_global_transform()
+	var rect := sprite.get_rect()
+	var top_left: Vector2 = xform * rect.position
+	var bottom_right: Vector2 = xform * rect.end
+	var expected := Rect2(cell.global_position,
+		Vector2(FarmCell.CELL_SIZE, FarmCell.CELL_SIZE))
+	var actual := Rect2(top_left, bottom_right - top_left)
+	if actual != expected:
+		print("        精灵 %s 盖的是 %s,格子的矩形是 %s" % [sprite.name, actual, expected])
+	return actual == expected and rect.size == expected.size
+
+
+## 某个农田格在屏幕上占的矩形(用渲染用的 canvas_transform,不猜相机位置)
+func _cell_screen_rect(farm: FarmPlot, cell: Vector2i) -> Rect2i:
+	var corner: Vector2 = get_viewport().get_canvas_transform() 		* farm.to_global(Vector2(cell) * FarmPlot.CELL_SIZE)
+	return Rect2i(Vector2i(floori(corner.x), floori(corner.y)),
+		Vector2i(FarmPlot.CELL_SIZE, FarmPlot.CELL_SIZE))
+
+
+## 两张画面在某个矩形里有多少像素不同
+func _diff_count(a: Image, b: Image, rect: Rect2i) -> int:
+	var count := 0
+	for y in range(rect.position.y, rect.end.y):
+		for x in range(rect.position.x, rect.end.x):
+			if a.get_pixel(x, y) != b.get_pixel(x, y):
+				count += 1
+	return count
 
 
 func _props_avoid_plot(props: FarmProps, farm: FarmPlot) -> bool:
@@ -608,6 +717,9 @@ func _test_main_scene() -> void:
 
 	# 「真的画出来了吗」只在逻辑层查不出来 —— 真读一帧画面量像素。
 	await _check_indicator_ink(indicator, main_player, main_plot)
+
+	# 「锄的格子」和「画面里变色的那块地」必须是同一格(用户第二次报的正是这个)
+	await _check_soil_lands_on_its_cell(main_player, main_plot)
 
 	# 走到草岛的左边往水里推,应该被正好在岸边的水墙挡住。
 	#

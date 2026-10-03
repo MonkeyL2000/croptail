@@ -26,6 +26,7 @@
 | 玩家 | `res://scenes/characters/player.tscn`(24 个动画 + Camera2D;由 `tools/gen_player_scene.py` 生成) |
 | HUD | `res://scenes/ui/hud.tscn` + `scripts/ui/hud.gd`(字体由 `tools/gen_pixel_font.py` 生成) |
 | 目标格指示框 | `scripts/farm/target_indicator.gd`(挂在 `main.tscn` 的 `TargetIndicator`,画在**所有东西之上**) |
+| 截图前的准备 | 截图工具默认把整块农田锄一遍(`till_plot`),好核对「土块有没有和格子对齐」 |
 | 导出 preset | **无**(还没建) |
 
 ## 操作
@@ -99,6 +100,20 @@
   - **新增回归断言**:拿同一个 TileSet 开临时层跑一遍引擎的 peering 再逐格对比;
     内部格必须是 `(1,1)`;岸边真走一遍并量停下的坐标
     (旧的松断言**恰好能让隐形墙通过**,这就是它当初漏掉的原因)。
+- [x] **2026-10-03 修复「指示器的格子和实际作用的格子不是一格」** —— 用户第二次指出来的
+  - **根因不在指示框**,在土块/作物贴图:`FarmCell` 里那两个 `Sprite2D` 是 `Sprite2D.new()`
+    出来的,**从来没设过 position**。而格子的原点在**左上角**、`Sprite2D` 默认
+    `centered = true` —— 于是 16x16 的贴图以左上角为圆心画,整块**偏左上 8px**。
+    逻辑层全绿(region 是对的),只有看画面才知道。
+  - 修法:`FarmCell.SPRITE_OFFSET = CELL_SIZE * 0.5`,土块和作物都摆到格子中心。
+  - **回归 1(纯逻辑)**:精灵自己的 `global_transform` 算出的矩形必须逐像素等于
+    它那一格的矩形。复现 bug 时报出 `[P: (312,88)] vs 格子的 [P: (320,96)]`。
+  - **回归 2(端到端像素)**:相机对准一格、藏起角色,锄它,逐像素比较前后两帧
+    (含先量一次「什么都不做」的对照,防止水面动画混进来)。变化必须全在那格的
+    16x16 里。好版本 `256/256 inside, 256 in the area`;把偏移改回 0 复现时是
+    `64/256 inside, 256 in the area` —— 四分之三的土块落到左上那格,和用户看到的一致。
+  - 截图复核:锄满整块农田后,土块包围盒 `x 304..495, y 66..177`(192x112)
+    正好等于农田外框,四条边界外一圈全是草像素。
 - [x] **2026-10-03 项目记忆 + 仓库**:`AGENTS.md` / `docs/` / `ASSET_CREDITS.md` / `README.md`;
       推到 GitHub:**https://github.com/MonkeyL2000/croptail**(public)
 - [x] **2026-10-03 目标格指示框 + 修「锄地有点歪,不是正前方那块」** —— 用户指出后做的
@@ -158,10 +173,12 @@
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
-  → **`=== SELFTEST END: 154 checks, 0 failed ===`**,连跑 3 次都 0 failed,ERROR 区为空。关键几条:
+  → **`=== SELFTEST END: 163 checks, 0 failed ===`**,连跑 3 次都 0 failed,ERROR 区为空。关键几条:
   - `facing down from there targets the next row, not your own` —— 「锄地有点歪」的回归
   - `the indicator pointed at the cell that got tilled` —— 框 == 工具作用的那格
   - `the indicator really draws pixels`(luma 0.821 有框 / 0.786 无框)
+  - `the soil sprite covers exactly its own cell` —— 土块/作物贴图必须正好盖住自己那格
+  - `tilling repaints nothing outside that cell`(256/256 格内 / 总共 256,一个像素都不漏)
   - `each direction of a tool uses its own atlas row` —— 「朝两边挥」那个 bug 的回归
   - `left frames are the exact mirror of the right frames (8 frames)`
   - `front action frames show the face, back frames do not`
@@ -175,7 +192,8 @@
 - `run_project {scene: "res://scenes/dev/screenshot.tscn"}` → `screenshots/shot_1..3.png`,
   逐像素复核:四个工具图标精确(0 误差)命中各自的素材格
   `Tools(0,2) / Tools(0,0) / Tools(0,4) / Plants(4,0)`;
-  指示框 = 16x16 方框套住目标格(农田内亮框+填充 / 农田外暗框,见上)
+  指示框 = 16x16 方框套住目标格(农田内亮框+填充 / 农田外暗框,见上);
+  锄满农田后土块包围盒 = 农田外框 (192x112,一分不差) —— 土块和格子的相位对上了
 - 主场景 `run_project {projectPath: "D:\\godot_projects\\croptail"}`:仅
   `[farm_props] ~390 props ... 19xx collision boxes` + `[farm_map] water walls: 76 collision shapes`,无 ERROR
 - 日期:2026-10-03

@@ -15,6 +15,9 @@ extends Node2D
 @export var frames_between: int = 40
 ## 截图前把玩家搬到哪里;空数组 = 不动,用主场景里的出生点
 @export var spots: Array[Vector2] = []
+## 截图前把整块农田锄一遍。土块是纯色平板,锄满之后整块农田 = 一个 192x112 的色块,
+## 边界正好压在农田外框上 —— 「土块贴图有没有偏移」一眼就能看出来。
+@export var till_plot: bool = true
 ## 每个位置朝哪边(和 spots 一一对应,不够长就沿用上一个)。
 ## 朝向决定「面前那一格」的指示框画在哪 —— 截图想拍指示框就必须能指定朝向。
 @export var facings: Array[Vector2] = []
@@ -26,6 +29,8 @@ func _ready() -> void:
 	add_child(main)
 	await get_tree().process_frame
 
+	if till_plot:
+		_till_plot(main)
 	_dump_hud_geometry(main)
 	var player: Player = main.get_node("Player")
 	for i in shots:
@@ -40,6 +45,18 @@ func _ready() -> void:
 		_dump_indicator(main, player, i)
 		await _shoot("shot_%d" % (i + 1))
 	print("[screenshot] done -> res://screenshots/")
+
+
+## 把农田每一格锄一遍(用游戏自己的规则入口,不直接改状态)
+func _till_plot(main: Node) -> void:
+	var plot: FarmPlot = main.get_node("FarmMap/FarmPlot")
+	var count := 0
+	for x in range(plot.columns):
+		for y in range(plot.rows):
+			if plot.use_tool(GameState.Tool.HOE, Vector2i(x, y), "") != "":
+				count += 1
+	print("[screenshot] tilled %d/%d cells (soil boundary should sit exactly on the plot outline)" % [
+		count, plot.columns * plot.rows])
 
 
 ## 指示框的状态:截图里看不见它的时候,靠这行判断是「没画」还是「画到画面外了」

@@ -42,6 +42,30 @@
 **代价**:格子多时节点数 = 列 x 行 x 2(现在是 84x2)。当前规模无所谓;
 真要上千格再考虑换 `MultiMeshInstance2D` 或烘焙贴图。
 
+**⚠️ 踩过的坑:格子里的 Sprite2D 必须自己摆到格子中心。**
+格子的原点是**左上角**,而 `Sprite2D` 默认 `centered = true` ——
+`Sprite2D.new()` 之后不设 `position`,那块 16x16 的贴图就会**以左上角为圆心**画,
+整块偏左上 8px。后果:土块/作物画在错误的位置,玩家看到的正是
+「指示器的格子和实际作用的格子不是一个格子」(用户第二次报的就是这个;
+逻辑层全绿 —— `region` 是对的,只有看画面才发现)。
+
+修法:`FarmCell.SPRITE_OFFSET = Vector2(CELL_SIZE * 0.5, CELL_SIZE * 0.5)`,
+土块和作物精灵都用它。`farm_props.gd` 里是 `centered = false` + 自己算底边中心,同理。
+
+**两条回归**(自检 163 项里):
+1. `the soil sprite covers exactly its own cell` —— 拿精灵自己的 `global_transform`
+   算可见矩形,必须**逐像素等于**格子的矩形。顺手记一笔:这个 helper 第一版是手算
+   `cell.to_global(get_rect().position)`,漏了 `sprite.position`,反过来冤枉了正确的代码。
+2. `tilling repaints nothing outside that cell` —— 端到端拿画面量:把相机对准一格、
+   藏起角色,锄它,然后逐像素比较前后两帧(64x64 区域,含先量一次「什么都不做」的对照),
+   变化的像素必须**全部**落在那格的 16x16 里。实测 `256/256 inside, 256 in the area`。
+   把偏移改回 `(0,0)` 复现 bug 时它是 `64/256 inside, 256 in the area` —— 正好是
+   「四分之三的土块落到了左上方那格」,和用户描述一致。
+
+**顺带**:截图工具现在默认把整块农田锄一遍(`till_plot`),土块是纯色平板,
+于是整块农田 = 一个 192x112 的色块,边界必须正好压在农田外框上 ——
+实测包围盒 `x 304..495, y 66..177` = 期望值,四边外一圈全是草像素。
+
 ---
 
 ## <a id="auto-walls"></a>水的碰撞墙在运行时按**岛的轮廓**自动生成

@@ -103,6 +103,12 @@
   `run_project {scene: "res://scenes/dev/screenshot.tscn"}`(存到 `res://screenshots/`);
   看整张地形对不对用 `python tools/render_map.py docs/art/map.png`;
   看地图布局用 `res://scenes/dev/map_dump.tscn`(打 ASCII 地图)。
+- **`Sprite2D.new()` 之后必须自己设 `position`**:把精灵摆到父节点的**中心**。
+  格子的原点在左上角,而 `Sprite2D` 默认 `centered = true` —— 不设位置的话贴图会以
+  左上角为圆心画、整块偏左上半格。它**不报错**、逻辑测试也全绿,只有看画面才发现
+  (用户报的「指示器的格子和实际作用的格子不是一格」就是这个,见 DECISIONS#cell-sprites)。
+- **改完贴图/精灵的落点,要拿画面量一次**:`scripts/dev/screenshot.gd` 会把农田锄满,
+  于是整块农田是个纯色 192x112 方块 —— 它的包围盒必须正好等于 `FarmPlot` 的外框。
 - GDScript 缩进必须用 Tab。
 - `GameState`/`TimeManager` 的函数**不要写成 `static`**:它们是 autoload 实例,
   从实例调用 static 函数引擎会报错(踩过,见 DECISIONS)。

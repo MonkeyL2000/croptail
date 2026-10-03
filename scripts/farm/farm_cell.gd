@@ -16,6 +16,10 @@ const SOIL_CELL := Vector2i(1, 1)
 const WATERED_TINT := Color(0.70, 0.62, 0.55)
 ## 成熟提示:整体提亮
 const MATURE_TINT := Color(1.35, 1.35, 1.25)
+## 精灵摆到**格子的中心**。Sprite2D 默认 `centered = true`,而格子的原点在**左上角** ——
+## 不自己挑位置的话,那块 16x16 的贴图会以左上角为圆心画,整块偏左上 8px:
+## 玩家看到的就是「锄到的格子和指示框不是同一格」(用户报过,见 DECISIONS#cell-sprites)
+const SPRITE_OFFSET := Vector2(CELL_SIZE * 0.5, CELL_SIZE * 0.5)
 
 static var _soil_texture: Texture2D
 static var _crop_texture: Texture2D
@@ -42,12 +46,14 @@ func _init() -> void:
 	_ensure_textures()
 	_soil_sprite = Sprite2D.new()
 	_soil_sprite.name = "SoilSprite"
+	_soil_sprite.position = SPRITE_OFFSET
 	_soil_sprite.visible = false
 	_soil_sprite.z_index = 0
 	add_child(_soil_sprite)
 
 	_crop_sprite = Sprite2D.new()
 	_crop_sprite.name = "CropSprite"
+	_crop_sprite.position = SPRITE_OFFSET
 	_crop_sprite.visible = false
 	_crop_sprite.z_index = 1
 	add_child(_crop_sprite)
