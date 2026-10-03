@@ -1,0 +1,16 @@
+# Godot 4
+.godot/
+/android/
+
+# Godot 导出产物
+/build/
+/export/
+*.translation
+
+# 编辑器 / 系统
+*.tmp
+*.orig
+*.rej
+Thumbs.db
+desktop.ini
+.DS_Store

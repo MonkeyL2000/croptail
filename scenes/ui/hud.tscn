@@ -1,0 +1,82 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_hud"]
+
+[node name="HUD" type="CanvasLayer"]
+script = ExtResource("1_hud")
+
+[node name="DayLabel" type="Label" parent="."]
+offset_left = 8.0
+offset_top = 4.0
+offset_right = 240.0
+offset_bottom = 20.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 12
+text = "Day 1"
+
+[node name="CoinsLabel" type="Label" parent="."]
+offset_left = 8.0
+offset_top = 20.0
+offset_right = 240.0
+offset_bottom = 36.0
+theme_override_colors/font_color = Color(1, 0.9, 0.4, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 12
+text = "Coins: 0"
+
+[node name="ToolLabel" type="Label" parent="."]
+offset_left = 8.0
+offset_top = 36.0
+offset_right = 240.0
+offset_bottom = 52.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 12
+text = "Tool: Hoe"
+
+[node name="SeedLabel" type="Label" parent="."]
+offset_left = 240.0
+offset_top = 4.0
+offset_right = 636.0
+offset_bottom = 20.0
+theme_override_colors/font_color = Color(0.8, 1, 0.8, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 12
+text = "Seeds:"
+
+[node name="HelpLabel1" type="Label" parent="."]
+offset_left = 240.0
+offset_top = 20.0
+offset_right = 636.0
+offset_bottom = 36.0
+theme_override_colors/font_color = Color(0.75, 0.75, 0.75, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 10
+text = "WASD / arrows: walk        Space: use tool"
+
+[node name="HelpLabel2" type="Label" parent="."]
+offset_left = 240.0
+offset_top = 34.0
+offset_right = 636.0
+offset_bottom = 50.0
+theme_override_colors/font_color = Color(0.75, 0.75, 0.75, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 10
+text = "1-4: tool   Q/E: cycle   R: seed   B: buy   T: end day"
+
+[node name="MessageLabel" type="Label" parent="."]
+offset_left = 8.0
+offset_top = 336.0
+offset_right = 632.0
+offset_bottom = 356.0
+theme_override_colors/font_color = Color(1, 1, 0.6, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 14

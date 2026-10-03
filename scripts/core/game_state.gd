@@ -1,0 +1,93 @@
+extends Node
+
+## autoload: GameState —— 全局玩法状态(工具选择 / 金币 / 物品栏)。
+## 纯逻辑,不碰节点树,方便单测(见 scripts/dev/selftest.gd)。
+##
+## 文案一律 ASCII:Godot 默认字体不含 CJK 字形,中文会渲染成方块。
+
+enum Tool { HOE, WATERING_CAN, SEED, HAND }
+
+const TOOL_ORDER: Array[int] = [Tool.HOE, Tool.WATERING_CAN, Tool.SEED, Tool.HAND]
+
+const TOOL_LABELS := {
+	Tool.HOE: "Hoe",
+	Tool.WATERING_CAN: "Watering Can",
+	Tool.SEED: "Seeds",
+	Tool.HAND: "Harvest",
+}
+
+## 初始种子:每种作物给几颗,让开局立刻能种
+const STARTING_SEEDS := {"wheat": 4, "greens": 4}
+const STARTING_COINS := 10
+
+signal tool_changed(tool_id: int)
+signal inventory_changed()
+signal coins_changed(coins: int)
+
+var current_tool: int = Tool.HOE
+var selected_crop: String = "wheat"
+var coins: int = STARTING_COINS
+var inventory: Dictionary = {}
+
+
+func _ready() -> void:
+	for crop_id in STARTING_SEEDS:
+		inventory[seed_item_id(crop_id)] = STARTING_SEEDS[crop_id]
+
+
+## 「种子」在物品栏里的 id。作物本身的 id 用于收获物,两者分开以免混淆。
+## 故意不是 static:GameState 是 autoload 实例,从实例上调用 static 函数引擎会报错。
+func seed_item_id(crop_id: String) -> String:
+	return "seed_" + crop_id
+
+
+func tool_label() -> String:
+	return TOOL_LABELS.get(current_tool, "?")
+
+
+func select_tool(tool_id: int) -> void:
+	if tool_id == current_tool:
+		return
+	current_tool = tool_id
+	tool_changed.emit(current_tool)
+
+
+## 在工具条上循环移动(step 为 +1 / -1)
+func cycle_tool(step: int) -> void:
+	var count := TOOL_ORDER.size()
+	var index := TOOL_ORDER.find(current_tool)
+	if index < 0:
+		index = 0
+	select_tool(TOOL_ORDER[(index + step + count) % count])
+
+
+func select_crop(crop_id: String) -> void:
+	if selected_crop == crop_id:
+		return
+	selected_crop = crop_id
+	inventory_changed.emit()
+
+
+func cycle_crop(step: int) -> void:
+	var ids := CropDB.all_ids()
+	if ids.is_empty():
+		return
+	var index := ids.find(selected_crop)
+	if index < 0:
+		index = 0
+	select_crop(ids[(index + step + ids.size()) % ids.size()])
+
+
+func item_count(item_id: String) -> int:
+	return int(inventory.get(item_id, 0))
+
+
+func add_item(item_id: String, amount: int = 1) -> void:
+	var total := item_count(item_id) + amount
+	inventory[item_id] = maxi(total, 0)
+	inventory_changed.emit()
+
+
+func add_coins(amount: int) -> void:
+	coins = maxi(coins + amount, 0)
+	coins_changed.emit(coins)

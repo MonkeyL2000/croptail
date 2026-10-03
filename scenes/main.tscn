@@ -1,0 +1,23 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="PackedScene" uid="uid://ce6dfgcs7wjpk" path="res://scenes/world/farm_map.tscn" id="1_map"]
+[ext_resource type="Script" path="res://scripts/core/main.gd" id="2_main"]
+[ext_resource type="Script" path="res://scripts/farm/farm_plot.gd" id="3_plot"]
+[ext_resource type="PackedScene" uid="uid://04ftqh3rmnjo" path="res://scenes/characters/player.tscn" id="4_player"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="5_hud"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("2_main")
+
+[node name="FarmMap" parent="." instance=ExtResource("1_map")]
+
+[node name="FarmPlot" type="Node2D" parent="."]
+position = Vector2(312, 107)
+script = ExtResource("3_plot")
+columns = 12
+rows = 7
+
+[node name="Player" parent="." instance=ExtResource("4_player")]
+position = Vector2(400, 250)
+
+[node name="HUD" parent="." instance=ExtResource("5_hud")]
