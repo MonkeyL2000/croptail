@@ -74,7 +74,7 @@ func _dump_indicator(main: Node, player: Player, spot: int) -> void:
 func _dump_hud_geometry(main: Node) -> void:
 	var hud: CanvasLayer = main.get_node("HUD")
 	for path in ["TopBar", "TopBar/Margin/Row/DayLabel", "BottomBar", "BottomBar/Message",
-			"ToolBar", "ToolBar/Slots", "Backpack"]:
+			"ToolBar", "ToolBar/Slots", "Materials", "Backpack"]:
 		var node: Control = hud.get_node(path)
 		print("[hud] %-30s rect %s" % [path, node.get_global_rect()])
 	var label: Label = hud.get_node("TopBar/Margin/Row/DayLabel")

@@ -26,11 +26,15 @@ If you fork this repository, these terms travel with the `game_source/` folder.
 | `Tilesets/` | Grass / Hills / Tilled_Dirt(_Wide)(_v2) 176x112 sheets, Water, Fences, Doors, house roof & walls |
 | `Tilesets/Bitmask references 1-2.png` | Terrain peering-bit reference sheets (not used at runtime) |
 | `Characters/Basic Charakter Spritesheet.png` | 192x192, 4x4 grid of 48x48 frames: idle (row A) + walk (row C) in 4 directions |
-| `Characters/Basic Charakter Actions.png` | 96x576 = 2 cols x 12 rows of 48x48. **One action is a 2x2 block** (rows 2b,2b+1 x cols 0,1), not a row — see below |
-| `Characters/Free Chicken Sprites.png`, `Free Cow Sprites.png` | Animals (not wired up yet) |
+| `Characters/Basic Charakter Actions.png` | 96x576 = 2 cols x 12 rows of 48x48. **2 columns = the two frames of one action; 12 rows = 3 actions x 4 directions** — see below |
+| `Characters/Free Chicken Sprites.png` | 64x32, two 2-frame rows (idle / walk); used by `scripts/world/chicken.gd` |
+| `Characters/Free Cow Sprites.png` | Cow (not wired up yet) |
 | `Characters/Egg_And_Nest.png`, `Objects/Egg_item.png` | Animal produce (not wired up yet) |
 | `Objects/Basic_Plants.png` | 96x32, 6x2 cells of 16x16: crop growth stages (see `docs/DECISIONS.md`) |
-| `Objects/` (others) | Furniture, grass-biome decor, chest, chicken house, paths, bridge, tools, milk item |
+| `Objects/` (others) | Furniture, grass-biome decor, chest, chicken house, paths, bridge, milk item |
+| `Objects/Basic_tools_and_meterials.png` | 48x32 = 3x2 cells: rocks + logs, **and two unused hand-tool sprites** used here as axe / pickaxe (inferred names — see `docs/DECISIONS.md#gather-tools`) |
+| `Tilesets/Fences.png` | 64x64 = 4x4 cells: post + horizontal rails (rows 1/2 have the rails); used for the chicken pen |
+| `Objects/Free_Chicken_House.png` | 48x48 = one 3x3-cell chicken coop |
 | `Sprout Lands color pallet/` | Reference palette (`.aseprite` + `.png`) |
 
 ## Sheet layouts used by the code
@@ -46,10 +50,16 @@ laid out as `(x = 0 then 48)` by direction rows `A=down, B=up, C=left, D=right`:
 | `walk_front/back/left/right` | Spritesheet | 96, 144 | 0 / 48 / 96 / 144 |
 
 **`Basic Charakter Actions.png`** — 96x576 = **2 cols x 12 rows** of 48x48.
-The sheet is only 96px wide, so a 4-frame animation **cannot** be one row:
-one action is a **2x2 block** (rows `2b`, `2b+1`; columns 0, 1), giving 6 blocks
-= 3 actions x 2 orientation groups (even blocks face front/back, odd blocks
-left/right). Frames run in reading order: `(0,0) (1,0) (0,1) (1,1)`.
+**The two columns are the two frames of one action, and one row is one
+*direction***: 12 rows = 3 actions (rows `0-3`, `4-7`, `8-11`) x 4 directions,
+ordered front / back / left / right inside each action. Rows are exact mirror
+pairs for left/right, which is how the layout was measured.
+
+> An earlier revision read rows `2b` and `2b+1` as "4 frames of one action".
+> That made `use_*_left` and `use_*_right` the *same* animation (each alternating
+> a left and a right frame) — the reported "the action swings to both sides" bug.
+> Evidence and the annotated layout image are in `docs/DECISIONS.md#action-blocks`
+> and `docs/art/actions_groups.png`.
 
 Which game tool uses which block is in `tools/gen_player_scene.py`
 (`TOOL_ACTION`); the frame rectangles are asserted to be inside the texture by

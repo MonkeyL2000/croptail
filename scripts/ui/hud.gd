@@ -19,7 +19,7 @@ const SLOT_GAP := 2
 const FONT_PATH := "res://game_source/font/sprout_ui.fnt"
 const FONT_SIZE := 12
 ## 要挂 theme 的面板(Label 从祖先继承,包括代码新建的那些)
-const PANELS: Array[String] = ["TopBar", "ToolBar", "Backpack", "BottomBar"]
+const PANELS: Array[String] = ["TopBar", "ToolBar", "Backpack", "Materials", "BottomBar"]
 
 @onready var _day_label: Label = $TopBar/Margin/Row/DayLabel
 @onready var _coins_label: Label = $TopBar/Margin/Row/CoinsLabel
@@ -27,10 +27,13 @@ const PANELS: Array[String] = ["TopBar", "ToolBar", "Backpack", "BottomBar"]
 @onready var _seed_label: Label = $TopBar/Margin/Row/SeedLabel
 @onready var _tool_slots: HBoxContainer = $ToolBar/Slots
 @onready var _backpack: HBoxContainer = $Backpack/Slots
+@onready var _materials: HBoxContainer = $Materials/Slots
 @onready var _message: Label = $BottomBar/Message
 
 var _tool_entries: Array[Dictionary] = []
 var _backpack_entries: Array[Dictionary] = []
+## 材料格:木头 / 石头。砍树挖石头得到的东西总得看得到,不然按下去像没反应
+var _material_entries: Array[Dictionary] = []
 var _message_left := 0.0
 
 
@@ -43,6 +46,7 @@ func _ready() -> void:
 	TimeManager.day_changed.connect(func(_day: int) -> void: _refresh())
 	_build_tool_bar()
 	_build_backpack()
+	_build_materials()
 	_message.text = ""
 	_refresh()
 
@@ -105,16 +109,31 @@ func _build_backpack() -> void:
 		icon.set_harvest_crop(crop_id)
 		var panel := _make_slot(icon)
 		_backpack.add_child(panel)
-		var count := Label.new()
-		count.name = "Count"
-		count.add_theme_color_override("font_color", Color(1, 1, 1))
-		count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		count.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-		count.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		count.add_theme_font_size_override("font_size", FONT_SIZE)
-		count.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		panel.add_child(count)
-		_backpack_entries.append({"crop": crop_id, "panel": panel, "count": count, "icon": icon})
+		panel.add_child(_make_count_label())
+		_backpack_entries.append({"crop": crop_id, "panel": panel, "count": panel.get_node("Count"), "icon": icon})
+
+
+## 木头 / 石头的数量格。图标表在 ToolIcons.ICONS(wood / stone)
+func _build_materials() -> void:
+	for item_id in GameState.MATERIAL_ORDER:
+		var icon := ItemIcon.create(item_id)
+		var panel := _make_slot(icon)
+		_materials.add_child(panel)
+		panel.add_child(_make_count_label())
+		_material_entries.append({"item": item_id, "panel": panel, "count": panel.get_node("Count")})
+
+
+## 格子右下角那位数字。背包和材料格共用。
+func _make_count_label() -> Label:
+	var count := Label.new()
+	count.name = "Count"
+	count.add_theme_color_override("font_color", Color(1, 1, 1))
+	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	count.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	count.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	count.add_theme_font_size_override("font_size", FONT_SIZE)
+	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return count
 
 
 func _make_slot(icon: ItemIcon) -> PanelContainer:
@@ -164,6 +183,13 @@ func _refresh() -> void:
 		(entry["icon"] as ItemIcon).tooltip_text = \
 			"%s seeds x%d  harvested x%d  (sell %d)" % [crop.display_name, seeds, harvested, crop.sell_price]
 		(entry["panel"] as Control).tooltip_text = (entry["icon"] as ItemIcon).tooltip_text
+
+	for entry in _material_entries:
+		var item_id: String = entry["item"]
+		var amount := GameState.item_count(item_id)
+		# 0 就不写数字,格子看着干净
+		(entry["count"] as Label).text = str(amount) if amount > 0 else ""
+		(entry["panel"] as Control).tooltip_text = "%s x%d" % [GameState.material_label(item_id), amount]
 
 
 func _set_slot_selected(panel: Control, selected: bool) -> void:

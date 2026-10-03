@@ -26,6 +26,8 @@ extends RefCounted
 const SHEETS := {
 	"biome": "res://game_source/Objects/Basic_Grass_Biom_things.png",
 	"materials": "res://game_source/Objects/Basic_tools_and_meterials.png",
+	"fence": "res://game_source/Tilesets/Fences.png",
+	"house": "res://game_source/Objects/Free_Chicken_House.png",
 }
 
 const PROPS := {
@@ -74,9 +76,28 @@ const PROPS := {
 	"pebble_d": {"sheet": "biome", "rect": Rect2(129, 7, 7, 7), "kind": "deco", "solid": false},
 	"pebble_e": {"sheet": "biome", "rect": Rect2(53, 54, 6, 6), "kind": "deco", "solid": false},
 	"pebble_f": {"sheet": "biome", "rect": Rect2(38, 56, 4, 4), "kind": "deco", "solid": false},
+
+	# --- 围栏(Tilesets/Fences.png 是 4x4 个 16x16 格)------------------
+	#
+	# 那张图是「十字路口」的写法:每格都是一根柱子 + 往左右伸的横杆。
+	#   col 0 = 只有柱子  col 1 = 柱 + 右横杆  col 2 = 柱 + 左右横杆  col 3 = 柱 + 左横杆
+	#   row 0/3 = 柱子的顶/底段,row 1/2 = 中段(横杆在中段上,高度一样)
+	# 所以**横排**围栏用 row 1:左端用 col 1、中间用 col 2、右端用 col 3。
+	# 竖排只有柱子可拼 —— 这张图里根本没有竖向横杆,别凭空造。
+	"fence_end_left": {"sheet": "fence", "rect": Rect2(16, 16, 16, 16), "kind": "fence", "solid": true},
+	"fence_mid": {"sheet": "fence", "rect": Rect2(32, 16, 16, 16), "kind": "fence", "solid": true},
+	"fence_end_right": {"sheet": "fence", "rect": Rect2(48, 16, 16, 16), "kind": "fence", "solid": true},
+	"fence_post": {"sheet": "fence", "rect": Rect2(0, 16, 16, 16), "kind": "fence", "solid": true},
+
+	# --- 鸡舍(3x3 格的一整栋房子)-----------------------------------------
+	"chicken_house": {"sheet": "house", "rect": Rect2(0, 0, 48, 48), "kind": "house", "solid": true},
 }
 
-const KINDS := ["tree", "rock", "wood", "deco"]
+## 会被随机撒出去的种类。fence / house 不在里面:它们是手摆的位置
+## (见 farm_props.gd 的 _place_landmarks),随机撒会撒出断头的围栏。
+const SCATTER_KINDS := ["tree", "rock", "wood", "deco"]
+## 所有种类:HUD 不算它,但统计输出要能列出围栏和鸡舍
+const KINDS := ["tree", "rock", "wood", "deco", "fence", "house"]
 
 
 static func names_of_kind(wanted: String) -> Array[String]:

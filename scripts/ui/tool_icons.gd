@@ -24,9 +24,25 @@ extends RefCounted
 ##
 ## 哪组是锄头、哪组是洒水壶没有官方图例,按「纯金属那组 = 洒水壶」定。
 ## 想换只改下面这张 ICONS 表。
+##
+## ## 斧头 / 镐头:素材包里的散件
+##
+## 官方页面上「chopping(砍)动画」是**付费包**的内容,免费包里只有
+## 3 套动作(锄 / 收割 / 浇水),`Tools.png` 里也只有 3 把工具。
+## 但 `Objects/Basic_tools_and_meterials.png` 里还有两格**没人用过**的手持工具
+## (金属头 + 斜木柄,像素面积 100 / 85,比 Tools.png 里那三把 21~33 大得多):
+## 里面 6 格里 4 格是石头和木料(PropDB 已用),剩下这 2 格就是斧和镐。
+## 用「金属像素占比」区分:金属头大而宽的那格 = 斧(金属 74/100 像素),
+## 金属头细而长的那格 = 镐(金属 57/85)。**这两格是没有官方命名的推断值**;
+## 觉得对不上就交换下面两行的 rect,或给人肉对照图 `docs/art/tools_objects.png` 看。
+##
+## 另外:`seed_bag` 借用了 Tools.png 工具 C 那组。可是按动作图集反推,
+## 工具 C 很可能是**镰刀**(收割那套动作里举的就是它)。这一格待定,见 docs/PROGRESS.md。
 
 const SHEET := "res://game_source/Characters/Tools.png"
 const PLANTS_SHEET := "res://game_source/Objects/Basic_Plants.png"
+const MATERIALS_SHEET := "res://game_source/Objects/Basic_tools_and_meterials.png"
+const BIOME_SHEET := "res://game_source/Objects/Basic_Grass_Biom_things.png"
 const CELL := 16
 
 ## 图标 id -> {"sheet": 图集路径, "rect": 源图集里的像素矩形}
@@ -37,8 +53,16 @@ const ICONS := {
 	"hoe": {"sheet": SHEET, "rect": Rect2(0, 32, 16, 16)},
 	# 工具 C 第 0 行第 0 格 —— 当种子袋
 	"seed_bag": {"sheet": SHEET, "rect": Rect2(0, 64, 16, 16)},
-	# 硬币:同一个图集里的圆片
+	# 金币:图集里没有真正的金币格,这里指着的 (0,80) 其实是「工具 C 的使用中状态」——
+	# 它只是个**占位**:只有作物表里没有的 id 才会退到这里(harvest_rect),现在不可能触发。
+	# 真要做金币图标就换一张贴图,别改这里的 rect。
 	"coin": {"sheet": SHEET, "rect": Rect2(0, 80, 16, 16)},
+	# 斧 / 镐:materials 图集里两格没人用过的手持工具(见文件头的说明)
+	"axe": {"sheet": MATERIALS_SHEET, "rect": Rect2(16, 0, 16, 16)},
+	"pickaxe": {"sheet": MATERIALS_SHEET, "rect": Rect2(32, 0, 16, 16)},
+	# 砍/挖到的材料。木料用 biome 图集那堆木柴(PropDB 也拿它当道具)
+	"wood": {"sheet": BIOME_SHEET, "rect": Rect2(80, 35, 16, 9)},
+	"stone": {"sheet": MATERIALS_SHEET, "rect": Rect2(0, 4, 16, 10)},
 }
 
 ## 收获物图标 = 该作物最后一个生长阶段的贴图(Basic_Plants.png 的第 4 列)
@@ -86,6 +110,10 @@ static func icon_id_for_tool(tool: int) -> String:
 			return "seed_bag"
 		GameState.Tool.HAND:
 			return "harvest"
+		GameState.Tool.AXE:
+			return "axe"
+		GameState.Tool.PICKAXE:
+			return "pickaxe"
 	return "hoe"
 
 

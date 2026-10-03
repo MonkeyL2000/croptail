@@ -30,7 +30,8 @@
 | `scripts/farm/` | 农田:`crop_data.gd`、`crop_db.gd`、`farm_cell.gd`(一格)、`farm_plot.gd`(网格+规则)、`target_indicator.gd`(面前那格的指示框) |
 | `scripts/player/` | 玩家本体 + 三个状态(idle/walk/use) |
 | `scripts/state_machine/` | 通用节点状态机(与游戏解耦) |
-| `scripts/world/`, `scripts/ui/` | 地图生成、HUD |
+| `scripts/world/` | 地图与地面物件:`farm_map.gd`(水墙)、`farm_props.gd`(撒道具/地标/斧镐规则)、`prop_db.gd`(道具表)、`chicken.gd` |
+| `scripts/ui/` | HUD(`hud.gd`)、图标表(`tool_icons.gd` / `item_icon.gd`) |
 | `main.tscn` 的节点顺序 | `FarmMap` → `Player` → `TargetIndicator`(指示框必须在最后 = 画在最上面),HUD 是 `CanvasLayer` 永远在最上 |
 | `scenes/dev/` | 开发工具场景:`selftest`(自检)、`screenshot`(出图)、`map_dump`(ASCII 地图)、`retile`(重算地形图块)、`grass_terrain_ref`(旧地图快照,当 peering 的标准答案) |
 | `scripts/dev/` | 上面那些工具的实现。都是 dev-only,不影响主场景 |
@@ -49,6 +50,8 @@
 | `annotate_sheet.py` | 给图集画格线存到 `docs/art/`,方便人工核对格子含义 |
 | `annotate_actions.py` | 把 `Basic Charakter Actions.png` 的版式(3 个动作组 x 4 个朝向)框出来标好,存 `docs/art/actions_groups.png` |
 | `annotate_terrain.py` | 把 TileSet 的 peering 信息画到图集上(`docs/art/terrain_*.png`):每格右上角一个九宫格,填色 = 那个方向也是同种地面 |
+| `annotate_objects.py` | 把**代码认定的名字**写在斧/镐/围栏/鸡舍的放大图上(`docs/art/tools_objects.png`),核对「哪格是什么」用 |
+| `carve_ponds.py` | 按椭圆删草地格、挖出池塘(`--dry-run` 可看效果)。改完**必须**跑 `retile.tscn` + `retile_grass.py` |
 | `render_map.py` | 离线把 `farm_map.tscn` 的地形层合成成一张整图(`docs/art/map.png`)。**看草坪对不对看这张**,不要在游戏里对着一小块猜 |
 | `extract_props.py` | 连通域分析道具图集(只是**建议**,权威表在 `prop_db.gd`) |
 
@@ -77,6 +80,8 @@
   (peering)决定,**只有引擎知道**(`scripts/dev/retile.gd` 调
   `set_cells_terrain_connect()`)。刷完地图形状要重跑一次 `retile.gd`,
   否则新格子全是同一个角块(踩过:整片草坪铺满左上角块,见 DECISIONS#grass-terrain)。
+  **池塘也是这么挖的**:`carve_ponds.py` 只是**删草地格**(水层本来就铺满整张图,在草下面),
+  所以啃了地图形状就一定要重跑 retile + retile_grass(见 DECISIONS#ponds)。
 - **每个 `TileMapLayer` 自己的 `position` 不同**(water 在 (0,0)、grass 在 (-8,-5)),
   所以**两层的格坐标不能直接运算** —— 它们差半格。要比就先换算成世界坐标。
   `FarmProps` 在 (0,0),与 grass 层也差半格:拿 grass 的格号去查 `FarmProps` 的
@@ -109,6 +114,9 @@
   (用户报的「指示器的格子和实际作用的格子不是一格」就是这个,见 DECISIONS#cell-sprites)。
 - **改完贴图/精灵的落点,要拿画面量一次**:`scripts/dev/screenshot.gd` 会把农田锄满,
   于是整块农田是个纯色 192x112 方块 —— 它的包围盒必须正好等于 `FarmPlot` 的外框。
+- **拿不定「这格素材是什么」时,别接着推**:`tools/annotate_sheet.py` /
+  `annotate_objects.py` / `annotate_terrain.py` 会把格子坐标画到图上,
+  让用户看一眼就能回答。斧/镐的名字就是这么来的(推断值,见 DECISIONS#gather-tools)。
 - GDScript 缩进必须用 Tab。
 - `GameState`/`TimeManager` 的函数**不要写成 `static`**:它们是 autoload 实例,
   从实例调用 static 函数引擎会报错(踩过,见 DECISIONS)。

@@ -1,7 +1,9 @@
 # croptail
 
 A small pixel farming game: **till soil, plant seeds, water them daily, harvest,
-sell for coins.** Built with Godot 4.3 on the
+sell for coins — and chop trees or mine rocks for materials.** There is a fenced
+chicken pen with wandering chickens and a few ponds carved into the island.
+Built with Godot 4.3 on the
 [Sprout Lands Basic Pack](https://cupnooble.itch.io/sprout-lands-asset-pack)
 by [Cup Nooble](https://cupnooble.carrd.co).
 
@@ -24,8 +26,9 @@ or open `project.godot` in the editor and hit F5.
 | Key | Action |
 |---|---|
 | WASD / arrow keys | walk (4 directions) |
-| Space | use the current tool on **the tile you are facing** |
+| Space | use the current tool on **the tile you are facing** (an on-ground box shows it) |
 | 1 / 2 / 3 / 4 | hoe / watering can / seeds / harvest |
+| 5 / 6 | axe (trees, logs) / pickaxe (rocks) |
 | Q / E | previous / next tool |
 | R | switch crop (wheat ⇄ greens) |
 | B | buy 1 seed of the current crop (costs coins) |
@@ -40,6 +43,15 @@ or open `project.godot` in the editor and hit F5.
 4. After 4 watered days the crop is mature (it glints); harvest it with `4`.
 5. Harvesting pays coins. A day passes on its own every 45 seconds, or press `T`.
 
+### Extras
+
+- **Axe (`5`)** fells trees and chops logs for wood, **pickaxe (`6`)** breaks
+  rocks for stone; the items show up in the materials box in the HUD corner.
+  The box in front of you lights up when the current tool can act on that tile.
+- **Chickens** wander inside the fenced pen east of the farm; **ponds** are real
+  water (you cannot walk in) and the shore collision is generated from the grass
+  island's outline at runtime.
+
 ## Layout
 
 | Path | Contents |
@@ -51,8 +63,10 @@ or open `project.godot` in the editor and hit F5.
 | `scripts/farm/` | `FarmPlot`, `FarmCell`, `CropData`, `CropDB` |
 | `scripts/player/` | player body + idle / walk / use states |
 | `scripts/state_machine/` | generic node-based FSM, game-agnostic |
-| `scripts/world/`, `scripts/ui/` | map collision generation, HUD |
+| `scripts/world/` | map collision (`farm_map.gd`), ground props + landmarks + gather rules (`farm_props.gd`, `prop_db.gd`), chickens (`chicken.gd`) |
+| `scripts/ui/` | HUD and the icon atlases (`hud.gd`, `tool_icons.gd`, `item_icon.gd`) |
 | `docs/` | `PROGRESS.md` (where it is) and `DECISIONS.md` (why) |
+| `docs/art/` | generated reference images (map render, sheet grids, action layout) |
 
 ## Self-check
 
@@ -63,9 +77,10 @@ hand — it drives the real scenes and prints a summary:
 godot --path . res://scenes/dev/selftest.tscn
 ```
 
-It ends with `=== SELFTEST END: N checks, 0 failed ===` and covers soil rules,
-the growth cycle, sprite atlas coordinates, state transitions, movement,
-main-scene wiring, and the water collision wall.
+It ends with `=== SELFTEST END: N checks, 0 failed ===` (223 checks at the time
+of writing) and covers soil rules, the growth cycle, sprite atlas coordinates,
+state transitions, movement, main-scene wiring, the water collision walls, the
+fence pen / chickens, axe & pickaxe rules, and the ponds.
 
 ## Credits
 
@@ -74,6 +89,6 @@ main-scene wiring, and the water collision wall.
 
 ## Roadmap
 
-See [`docs/PROGRESS.md`](docs/PROGRESS.md). Next up: map furniture (chicken
-house, bridge, fences), animal produce, a real shop instead of instant coin
-gain, and saving.
+See [`docs/PROGRESS.md`](docs/PROGRESS.md). Next up: HUD hint messages for the
+farm tools, a real shop instead of instant coin gain, eggs from the chickens,
+and saving.

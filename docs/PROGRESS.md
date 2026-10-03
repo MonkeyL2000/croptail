@@ -16,15 +16,19 @@
 | 自检场景 | `res://scenes/dev/selftest.tscn`(**逻辑改动的验收口**) |
 | 截图工具 | `res://scenes/dev/screenshot.tscn` → `res://screenshots/shot_*.png` |
 | 地形整图 | `python tools/render_map.py docs/art/map.png`(离线合成,看草坪对不对看这张) |
+| 素材对照图 | `python tools/annotate_objects.py` → `docs/art/tools_objects.png`(把代码认定的名字写在斧/镐/围栏/鸡舍的放大图上,人工核对用) |
 | 动作版式图 | `python tools/annotate_actions.py` → `docs/art/actions_groups.png`(3 个动作组 x 4 个朝向,人工核对用) |
 | 地形图块重算 | `res://scenes/dev/retile.tscn`(改了地图形状后要跑;先自校验参考图) |
 | 地图速览 | `res://scenes/dev/map_dump.tscn`(打 ASCII 地图) |
 | autoload | `GameState`=`res://scripts/core/game_state.gd`,`TimeManager`=`res://scripts/core/time_manager.gd` |
-| 地图 | `res://scenes/world/farm_map.tscn`(1938 格草 + 3312 格水,72x46 格)。改完形状要重跑 `res://scenes/dev/retile.tscn`,否则新格子的图块是错的 |
-| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~390 个,碰撞从贴图 alpha 现算 |
+| 地图 | `res://scenes/world/farm_map.tscn`(1764 格草 + 3312 格水,72x46 格;草地层被 `tools/carve_ponds.py` 挖了 3 个池塘 = 174 格)。改完形状要重跑 `res://scenes/dev/retile.tscn`,否则新格子的图块是错的 |
+| 池塘 | 3 个椭圆(带 sin 抖动边),**水是露出来的**:删掉草地格就见到下面的水层,岸边不用过渡素材;塘口自动被水墙围上(见 `docs/DECISIONS.md#ponds`) |
+| 地标 | 围栏圈 + 鸡舍 + 2 只鸡,`farm_props.gd::_place_landmarks()` 手摆(`PEN_RECT`/`HOUSE_RECT`),手摆的格子在撒道具前就写进 `reserved` |
+| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~350 个随机道具 + 18 段围栏 + 1 鸡舍,碰撞从贴图 alpha 现算。斧/镐能敲掉它们(tree/wood → 木头,rock → 石头) |
+| 工具 | 6 把:锄/水壶/种子/收获(作用在农田)+ 斧/镐(作用在地面物件)。斧/镐的名字是**像素推断**的,见 `docs/DECISIONS.md#gather-tools` 和 `docs/art/tools_objects.png` |
 | TileSet | `res://tilesets/test_tilemap.tres`(旧名沿用;水墙碰撞由 `farm_map.gd` 运行时生成) |
-| 玩家 | `res://scenes/characters/player.tscn`(24 个动画 + Camera2D;由 `tools/gen_player_scene.py` 生成) |
-| HUD | `res://scenes/ui/hud.tscn` + `scripts/ui/hud.gd`(字体由 `tools/gen_pixel_font.py` 生成) |
+| 玩家 | `res://scenes/characters/player.tscn`(32 个动画 = idle/walk x 4 朝向 + 6 把工具 x 4 朝向;由 `tools/gen_player_scene.py` 生成) |
+| HUD | `res://scenes/ui/hud.tscn` + `scripts/ui/hud.gd`(字体由 `tools/gen_pixel_font.py` 生成):顶栏 + 左下工具条(6 格)+ 右下背包 + 材料格(木/石) |
 | 目标格指示框 | `scripts/farm/target_indicator.gd`(挂在 `main.tscn` 的 `TargetIndicator`,画在**所有东西之上**) |
 | 截图前的准备 | 截图工具默认把整块农田锄一遍(`till_plot`),好核对「土块有没有和格子对齐」 |
 | 导出 preset | **无**(还没建) |
@@ -36,6 +40,7 @@
 | WASD / 方向键 | 四方向移动(相机跟随) |
 | Space | 用当前工具作用在**面前那一格** —— 那一格地上有指示框(先按方向键定朝向) |
 | 1 / 2 / 3 / 4 | 锄头 / 水壶 / 种子 / 收获 |
+| 5 / 6 | 斧头(砍树、砍木料)/ 镐头(敲石头)—— 面前那一格上有树或石头时,指示框会点亮 |
 | Q / E | 上/下一个工具 |
 | R | 换作物(小麦 ⇄ 叶菜) |
 | B | 买 1 颗当前作物的种子(扣金币) |
@@ -135,23 +140,57 @@
   - **截图逐像素复核**:农田内 `(0,1)`/`(4,6)` 都是完整 16x16 方框(奶油线+白填充),
     农田外 `(15,15)` 只有暗灰框线、无填充。截图工具现在会打印 `canvas xform` 和
     指示框状态,见 `DECISIONS.md#canvas-transform`。
+- [x] **2026-10-03 加斧头/镐头 + 池塘 + 围栏鸡舍**,用户提的三件事(「是不是应该有镐头、斧头?
+      加一点池塘,看看还有什么其他素材,增加一点」)
+  - **斧 / 镐**:免费包没有斧镐、也没有「砍」的动作(付费包才有),这两格是从
+    `Objects/Basic_tools_and_meterials.png` 里**捡**的(6 格里 4 格已用,剩两格是
+    手持工具:不透明像素 100/85,而 `Tools.png` 里三把只有 21~33)。先用旋转不变的
+    形状 IoU 证明它们和三把都不一样(交叉 IoU ~0.1),再按金属像素占比分斧/镐。
+    **这两格的名字是没有官方图例的推断值** —— 人肉对照图 `docs/art/tools_objects.png`。
+    规则:`GameState.tool_works_on_props()` + `FarmProps.can_use()/use_tool()/remove_at()`;
+    树种 kind=tree/wood,石头 kind=rock。斧 = +2 木,砍木料 = +1 木,镐 = +1 石。
+    敲完要**同时**腾 `blocked`/`solid_cells`/节点(`#prop-gather`),而且得先把节点
+    摘下来再 `queue_free()`(否则帧末前一瞬间碰撞数会多算)。
+    妥协:斧/镐复用锄头的过顶挥砍动作(免费包没别的可借),自检里有一条断言钉住它。
+  - **池塘**:`tools/carve_ponds.py` —— 3 个椭圆(带 sin 抖动边)把**草地格删掉**,
+    下面的水层就露出来了(所以岸边不需要过渡素材、塘口自动被水墙围上)。
+    1938 → 1764 格(挖掉 9%)。已跑 `retile` + `tools/retile_grass.py` 重算图块
+    (参考图校验仍然 PASS)。自检:岛内非草格 174 > 100、塘不穿农田、
+    从岸边推进塘里停在「塘口 + 半径」**0.0px** 误差。
+  - **围栏圈 + 鸡舍 + 鸡**:`farm_props.gd::_place_landmarks()` 手摆(不随机撒,否则
+    围栏会断成一截截);`Fences.png` 是「十字路口」写法,只有横向横杆,所以只能拼横排;
+    `scripts/world/chicken.gd` 现造 `SpriteFrames`(row0=idle/row1=walk,各 2 帧),
+    在围栏内随机游荡 —— **故意不加 `class_name`**、用 `preload`,免得要重导一次。
+    地标占的格子在撒道具前写进 `reserved`,所以圈里不长树。
+  - **HUD 加了材料格**(木/石,右下角,带数量):砍完树看不到成果的话就像没反应。
+    工具条从 4 格变 6 格:面板宽 110 → 166(`PanelContainer` 自己长大),
+    自检新增「面板装得下内容」一条(工具多两把时真会溢到底色外面)。
+  - **自检 163 → 223 项**,新增 `-- landmarks`(7)/`-- axe / pickaxe`(21)/`-- ponds`(5)
+    和「只侜斧镐能对道具动手」等。踩过的坑:摆玩家验「面朝树」时直接拿 props 格中心摆人,
+    结果差**一整格**(两套格坐标偏移不是整格 + 脚下圆比身体中心低 6px),
+    得从 `props_cell_of(Vector2i.ZERO)` 问出偏移;比 `AtlasTexture` 用 `==` 会报假 FAIL,
+    得逐像素比。都记在 `DECISIONS.md#test-placement-frames`。
 
 ## Next(按顺序做)
 
-1. **把 HUD 的「提示」用起来**:现在只有 `main.gd` 开机时那一条。
-   在 `farm_cell.gd` / `player.gd` 的失败分支上 `GameState` 发消息
-   (比如「要用锄头」「这里已经种了」「水够多了」),让玩家知道为什么按了没反应。
+1. **把 HUD 的「提示」用完**:斧/镐已经会发提示了(「Chopped a tree (+2 wood).」等),
+   农田那四个工具的失败分支还是静默的。在 `farm_cell.gd` (已锄/已种/水够多)
+   和 `player.gd` (手里没种子/没金币)的失败分支上 `GameState` 发消息。
 2. **卖东西的经济闭环**:现在收获即加钱。改成把作物拿到 `Chest`/摊位卖,
    让 `GameState.add_coins` 只在一个地方被调用,方便以后加价格波动。
    素材:`game_source/Objects/Chest.png`(240x96,检视里切区域)。
-3. **鸡舍产蛋**:新建 `scripts/farm/animal_pen.gd`,每天产 1 个蛋,
-   玩家用收获工具走到旁边捡起。素材:`Characters/Egg_And_Nest.png`、
-   `Objects/Egg_item.png`(16x16)、`Characters/Free Chicken Sprites.png`。
+3. **鸡舍产蛋**:鸡已经在围栏里游荡了(`scripts/world/chicken.gd`),但还不产蛋。
+   新建 `scripts/farm/animal_pen.gd`:每天产 1 个蛋,玩家用收获工具走到旁边捡起。
+   素材:`Characters/Egg_And_Nest.png`、`Objects/Egg_item.png`(16x16)。
 4. **存档**:`user://save.json`,序列化 `GameState.inventory/coins/selected_crop`
-   + `TimeManager.day` + 每个 `FarmCell` 的 (soil, watered, crop id, growth)。
+   + `TimeManager.day` + 每个 `FarmCell` 的 (soil, watered, crop id, growth)
+   + **已经敲掉的道具**(现在砍了就不会重生,不存会「读档后树全回来了」)。
    `FarmPlot` 已经有稳定的 `grid_pos` 键;`TimeManager.day_fraction()` 是派生值不用存。
 5. **背包格显示收获物数量**:`hud.gd::_build_backpack()` 里已经有 `harvested` 的数值,
    现在只画了种子数(右下角)。要同时显示就再加一个左下角的 Label。
+6. **还没用上的素材**:`Wood_Bridge.png`(过池塘的桥 —— 现在塘是实心的,要造桥就得
+   在塘上开一条通道并把水墙断开)、`Paths.png`(砌小径)、`Basic_Furniture.png`、
+   `Free Cow Sprites.png` + `Simple_Milk_and_grass_item.png`(牛奶产线)。
 
 ## 卡点 / 风险
 
@@ -160,42 +199,53 @@
 - `Basic_Plants.png` 的格子含义是像素级推断(见 `DECISIONS.md#plant-cells`),
   `Tools.png` 里「哪组是锄头」也是推断 —— 两处都有对照图可人工核对:
   `docs/art/plants_sheet.png`、`docs/art/tools_sheet.png`(`tools/annotate_sheet.py` 生成)。
+- ⚠️ **待确认 1**:斧/镐用的是 `Basic_tools_and_meterials.png` 里两格没人用过的手持工具,
+  **素材包里没有图例**,「哪格是斧、哪格是镐」是按金属头的宽窄/占比定的(见 `#gather-tools`)。
+  对照图 `docs/art/tools_objects.png`;觉得反了就交换 `tool_icons.gd` 里两行 rect。
+  另外「砍」的动作是付费包内容,斧/镐现在借锄头的挥砍动画。
+- ⚠️ **待确认 2**:种子图标取的是 `Tools.png` 行 4,但按动作图集反推那一行很可能是**镰刀**
+  (收割动作里举的就是它)。四个图标确实互不相同,需求已满足;
+  有真正的种子袋素材时应该换过去。
 - 杂草 / 石头会挡农田的格子 —— 现在 `FarmCell` 没有「障碍物」概念,以后加野草要顺手加这一位。
-- ⚠️ **待确认**:种子图标取的是 `Tools.png` 行 4,但那一行的像素是「木件 + 金属箍」,
-  不像种子袋(见 `DECISIONS.md#tools-sheet` 的表)。四个图标确实互不相同,需求已满足;
-  但若找到真正的种子袋素材(也许在 `Objects/Basic_tools_and_meterials.png` 里),应该换过去。
 - 角色动画是一整块图集切出来的,没有图例。改 `tools/gen_player_scene.py` 之后
   **必须**跑一次 `launch_editor` 重新导入,否则看的是旧缓存(见 `DECISIONS.md#reimport`)。
 - 自检里**合成按键不可靠**(会时灵时不灵),验物理的用例不要依赖它;
-  另有「格坐标跨节点混用」的坑 —— 见 `DECISIONS.md#synthetic-input`、`#frame-mixing`。
+  另有「格坐标跨节点混用」的坑 —— 见 `DECISIONS.md#synthetic-input`、`#frame-mixing`、
+  `#test-placement-frames`(摆玩家、比贴图都各踩过一次)。
 - 没有音频素材(原包里就没有)。
 
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
-  → **`=== SELFTEST END: 163 checks, 0 failed ===`**,连跑 3 次都 0 failed,ERROR 区为空。关键几条:
-  - `facing down from there targets the next row, not your own` —— 「锄地有点歪」的回归
-  - `the indicator pointed at the cell that got tilled` —— 框 == 工具作用的那格
-  - `the indicator really draws pixels`(luma 0.821 有框 / 0.786 无框)
-  - `the soil sprite covers exactly its own cell` —— 土块/作物贴图必须正好盖住自己那格
-  - `tilling repaints nothing outside that cell`(256/256 格内 / 总共 256,一个像素都不漏)
-  - `each direction of a tool uses its own atlas row` —— 「朝两边挥」那个 bug 的回归
-  - `left frames are the exact mirror of the right frames (8 frames)`
-  - `front action frames show the face, back frames do not`
-  - `grass tiles match the TileSet's own terrain peering`(拿引擎当标准答案逐格比)
-  - `a fully surrounded cell uses the interior tile`(`(1,1)`)
-  - `water wall is flush with the shore (within 1px)`(岸边实测 草沿 -264,玩家 -259,**零抖动**)
-  - 字体探针 `'D' 墨迹在 Label 内的行 3..11`、`DayLabel rect y 4..19, ink rows 7..18`
-- `scripts/dev/retile.gd` → **`REFERENCE CHECK: PASS`**(263 格标准答案 0 差异)
+  → **`=== SELFTEST END: 223 checks, 0 failed ===`**,ERROR 区为空。本轮新增的关键几条:
+  - `the axe fells the whole tree, not just one cell` + `the felled tree frees all its cells`
+    (可站立格数正好多出 `size.x * size.y`)
+  - `chopping through the player adds wood to the inventory` + `the HUD shows the chopped wood`
+    —— 走完「选工具 → 面朝树 → 按使用 → 图标/数字跟着变」整条链路
+  - `the indicator lights up on a choppable tree` / `...goes dim once the tree is gone`
+  - `every fence piece stands on a grass cell`(围栏漂到水里也能看着像正常)
+  - `nothing grows inside the pen` / `every chicken stays inside the pen`
+  - `every chicken is animating from a 2-frame sheet`
+  - `the island has ponds carved into it` + `the pond wall is flush with the water edge`
+    (塘格 (-13,20),从 (-14,20) 推 (1,0),圆心停在 -221.0,期望 -221.0,**差 0.0px**)
+  - `only the axe and the pickaxe work on props`(工具→适用对象就这一处判断)
+  - `ToolBar contains its contents`(工具从 4 把变 6 把,面板得自己长大)
+  - 上一轮那些回归依然全绿(`the soil sprite covers exactly its own cell`、
+    `tilling repaints nothing outside that cell` 256/256、`each direction of a tool uses its own atlas row`、
+    `left frames are the exact mirror of the right frames (12 frames)`、
+    `water wall is flush with the shore (within 1px)` 草沿 -264/玩家 -259 零抖动、字体探针 `D` 墨迹 3..11)
+- `scripts/dev/retile.gd` → **`REFERENCE CHECK: PASS`**(263 格标准答案 0 差异;池塘后的新表已写回 `farm_map.tscn`)
 - `python tools/render_map.py docs/art/map.png` → 1152x736 整张地形图;
-  `python tools/annotate_terrain.py` → `docs/art/terrain_grass.png`(peering 九宫格对照)
-- `run_project {scene: "res://scenes/dev/screenshot.tscn"}` → `screenshots/shot_1..3.png`,
-  逐像素复核:四个工具图标精确(0 误差)命中各自的素材格
-  `Tools(0,2) / Tools(0,0) / Tools(0,4) / Plants(4,0)`;
-  指示框 = 16x16 方框套住目标格(农田内亮框+填充 / 农田外暗框,见上);
-  锄满农田后土块包围盒 = 农田外框 (192x112,一分不差) —— 土块和格子的相位对上了
+  `python tools/annotate_terrain.py` → `docs/art/terrain_*.png`;
+  `python tools/annotate_objects.py` → `docs/art/tools_objects.png`(斧/镐/围栏/鸡舍的对照图)
+- `run_project {scene: "res://scenes/dev/screenshot.tscn"}` → `screenshots/shot_1..3.png`(像素复核):
+  - shot_3 里预测的池塘屏幕范围内 18319 px 是水色 `(155,212,195)`(塘外一个都没有),
+    另一个塘也对上了 —— 池塘确实画出来了
+  - shot_2 围栏屏幕矩形里检出 2 团鸡身奶油色 `(243,242,192)`(围栏/鸡舍调色板里没这个色)
+  - 锄满农田后土块包围盒 = 农田外框 (192x112) 依然一分不差
 - 主场景 `run_project {projectPath: "D:\\godot_projects\\croptail"}`:仅
-  `[farm_props] ~390 props ... 19xx collision boxes` + `[farm_map] water walls: 76 collision shapes`,无 ERROR
+  `[farm_props] 347 props (83 tree / 35 rock / 27 wood / 183 deco / 18 fence / 1 house) ... 1730 collision boxes`
+  + `[farm_map] water walls: 101 collision shapes`,**无 ERROR**(水墙从 76 增到 101 = 塘口围上了)
 - 日期:2026-10-03
 
 ## 待补的记录

@@ -15,6 +15,8 @@ const INVALID_CELL := Vector2i(-9999, -9999)
 
 ## 由 main.gd 注入(不放 @export,避免跨场景的 NodePath 解析问题)
 var farm_plot: FarmPlot
+## 地面上的物件(树 / 石头 / 木料)。斧、镐作用于它,而不是农田格子
+var farm_props: FarmProps
 var facing: Vector2 = Vector2.DOWN
 
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
@@ -32,6 +34,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		GameState.select_tool(GameState.Tool.SEED)
 	elif event.is_action_pressed("tool_slot_4"):
 		GameState.select_tool(GameState.Tool.HAND)
+	elif event.is_action_pressed("tool_slot_5"):
+		GameState.select_tool(GameState.Tool.AXE)
+	elif event.is_action_pressed("tool_slot_6"):
+		GameState.select_tool(GameState.Tool.PICKAXE)
 	elif event.is_action_pressed("prev_tool"):
 		GameState.cycle_tool(-1)
 	elif event.is_action_pressed("next_tool"):
@@ -129,14 +135,52 @@ func facing_cell_offset() -> Vector2i:
 	return Vector2i(1, 0)
 
 
-## 用当前工具作用于面前那一格,并把结果广播给 HUD
+## 用当前工具作用于面前那一格,并把结果广播给 HUD。
+##
+## 分两条路:斧/镐是对**地面上的物件**动手(树、石头),其余四个工具是对
+## **农田格子**动手。两条路的规则各自集中在一个 use_tool() 里
+## (FarmProps / FarmPlot),这里只负责分派与发提示。
 func use_current_tool() -> void:
+	var cell := target_cell()
+	if GameState.tool_works_on_props(GameState.current_tool):
+		if farm_props == null:
+			action_message.emit("Nothing to work on here.")
+			return
+		var result := farm_props.use_tool(GameState.current_tool, props_cell_of(cell))
+		var item := String(result.get("item", ""))
+		if item != "":
+			GameState.add_item(item, int(result.get("amount", 0)))
+		var gather_message := String(result.get("message", ""))
+		if gather_message != "":
+			action_message.emit(gather_message)
+		return
+
 	if farm_plot == null:
 		action_message.emit("Nothing here.")
 		return
-	var message := farm_plot.use_tool(GameState.current_tool, target_cell(), GameState.selected_crop)
+	var message := farm_plot.use_tool(GameState.current_tool, cell, GameState.selected_crop)
 	if message != "":
 		action_message.emit(message)
+
+
+## 农田格坐标 -> FarmProps 那套格坐标。
+##
+## 两个网格的**点阵是一样的**(都是 16px,且农田格 (0,0) 正落在草地层 (20,7)),
+## 但原点不同:player.target_cell() 给的是**农田自己**的格号,FarmProps 用的是
+## 草地层那套。所以拿农田格中心的世界坐标回问 props,不写死 (20,7) 这个偏移 ——
+## 农田一旦搬家,写死的数字会静静地错一整格。
+func props_cell_of(cell: Vector2i) -> Vector2i:
+	if farm_props == null or farm_plot == null:
+		return cell
+	return farm_props.to_local_cell(farm_plot.cell_center(cell))
+
+
+## 面前那一格上,当前工具能不能真的动手(指示框高亮用)。
+## 非斧/镐直接返回 false,连遍历道具表都省了。
+func props_actionable(cell: Vector2i) -> bool:
+	if farm_props == null or not GameState.tool_works_on_props(GameState.current_tool):
+		return false
+	return farm_props.can_use(GameState.current_tool, props_cell_of(cell))
 
 
 func buy_seed() -> void:

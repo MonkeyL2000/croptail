@@ -23,11 +23,12 @@ func _ready() -> void:
 	farm_props.rebuild()
 
 	player.farm_plot = farm_plot
+	player.farm_props = farm_props
 	player.action_message.connect(hud.show_message)
 	target_indicator.setup(player, farm_plot)
 	TimeManager.day_changed.connect(_on_day_changed)
 	_apply_camera_limits()
-	hud.show_message("Hoe (1) then Seeds (3) then Water (2) - crops only grow on watered days")
+	hud.show_message("Hoe(1) Seeds(3) Water(2) | Axe(5) Pickaxe(6) | Space: use in front")
 
 
 ## 把相机卡在草岛范围内。限制值从 TileMapLayer 现场算(见 farm_map.gd),

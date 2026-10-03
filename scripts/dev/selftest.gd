@@ -436,7 +436,7 @@ func _spawn_is_clear(props: FarmProps, spawner: Node2D, radius: int) -> bool:
 func _test_tool_art() -> void:
 	print("-- tool art")
 	var tool_ids := GameState.TOOL_ORDER
-	check("there are 4 tools", tool_ids.size() == 4)
+	check("there are 6 tools (4 farm tools + axe + pickaxe)", tool_ids.size() == 6)
 
 	# 四张图标必须真的不一样。最阴的错法是「同一把工具转四个角度」——
 	# 四个 icon_id 不同,但取到的是同一片美术,所以这里比的是**像素**。
@@ -464,7 +464,7 @@ func _test_tool_art() -> void:
 			var anim_name := "use_%d_%s" % [tool + 1, direction]
 			if not frames.has_animation(anim_name):
 				missing.append(anim_name)
-	check("16 use animations exist (4 tools x 4 directions)", missing.is_empty())
+	check("24 use animations exist (6 tools x 4 directions)", missing.is_empty())
 	check("use animations are distinct per tool",
 		frames.get_frame_texture("use_1_front", 0) != frames.get_frame_texture("use_2_front", 0))
 	check("use animations are distinct per direction",
@@ -514,7 +514,7 @@ func _test_tool_art() -> void:
 				mirror_ok = false
 				print("      %s frame %d is not the mirror of %s" % [left, index, right])
 	check("left frames are the exact mirror of the right frames (%d frames)" % mirrored_frames,
-		mirror_ok and mirrored_frames == 8)
+		mirror_ok and mirrored_frames == 12)
 
 	# 前/后不能接反:靠脸 —— 立绘表里只有前视图的头部有肤色像素(实测每行 5~8 颗,
 	# 后视图 0 颗)。行 4a 应当是前、4a+1 应当是后。
@@ -542,6 +542,33 @@ func _test_tool_art() -> void:
 	player.set_facing(Vector2.UP)
 	player.play_use_anim(GameState.Tool.SEED)
 	check("seeds facing up plays use_3_back", player.animated_sprite.animation == "use_3_back")
+
+	# 斧 / 镐。图标是 materials 图集里两格没人用过的手持工具(见 tool_icons.gd 的说明)。
+	# 两张必须互不相同 —— 不然又回到「同一把工具转个角度」那个老毛病。
+	check("the axe and pickaxe icons are not the same art",
+		not _same_image(ToolIcons.make_texture("axe"), ToolIcons.make_texture("pickaxe")))
+	check("the wood and stone icons are not the same art",
+		not _same_image(ToolIcons.make_texture("wood"), ToolIcons.make_texture("stone")))
+	player.set_facing(Vector2.DOWN)
+	player.play_use_anim(GameState.Tool.AXE)
+	check("the axe plays use_5_front", player.animated_sprite.animation == "use_5_front")
+	player.play_use_anim(GameState.Tool.PICKAXE)
+	check("the pickaxe plays use_6_front", player.animated_sprite.animation == "use_6_front")
+	# 免费素材包只有 3 套动作(锄/收割/浇水),没有「砍」的专用动作 ——
+	# 斧和镐故意借用锄头那套过顶挥砍,这条把那个妥协钉在测试里(不是忘记改)。
+	# 比**像素**而不是比资源对象:每一帧都是各自 new 出来的 AtlasTexture,
+	# 指向同一块区域但对象不同(这里第一次就比错了,报了个假 FAIL)。
+	check("the axe and pickaxe borrow the hoe's overhead swing",
+		_same_image(frames.get_frame_texture("use_5_front", 0), frames.get_frame_texture("use_1_front", 0))
+		and _same_image(frames.get_frame_texture("use_6_left", 0), frames.get_frame_texture("use_1_left", 0)))
+
+	# 哪些工具是对「地面上的物件」动手的 —— player.gd 靠这个分派
+	var gather: Array[int] = []
+	for tool in tool_ids:
+		if GameState.tool_works_on_props(tool):
+			gather.append(tool)
+	check("only the axe and the pickaxe work on props",
+		gather == [GameState.Tool.AXE, GameState.Tool.PICKAXE])
 
 	# HUD 用的位图字体能在运行时加载
 	check("HUD has the pixelfont resource", load("res://game_source/font/sprout_ui.fnt") != null)
@@ -787,6 +814,243 @@ func _test_main_scene() -> void:
 		_dump_shore(main, main_props, main_player)
 
 	await _test_tree_blocks_player(main_props, main_player)
+	_test_landmarks(main_props, main)
+	await _test_gather(main_props, main_player, indicator, main.get_node("HUD"))
+	_test_ponds(map, main_props, main_player, main_plot)
+
+
+## 手摆地标:围栏圈 / 鸡舍 / 鸡。
+##
+## 这里最要紧的一条是「围栏到底站在哪个格上」:地标用的是**草地层**那套格坐标,
+## 而道具占用簿(blocked / solid_cells)是 props 自己那套。两套差半格的话,
+## 围栏会整排漂到水里(岛外面全是一片水,看起来还挺正常),而且
+## 碰撞墙也跟着漂 —— 玩家会撞到看不见的东西。
+func _test_landmarks(props: FarmProps, main: Node) -> void:
+	print("-- landmarks (fence pen / coop / chickens)")
+	check("the pen is fenced", props.count_kind("fence") >= 14)
+	check("there is a chicken house", props.count_kind("house") == 1)
+
+	var off_grass := 0
+	for entry in props.placed:
+		if entry["kind"] != "fence":
+			continue
+		if not props.grass_cells.has(entry["cell"]):
+			off_grass += 1
+	check("every fence piece stands on a grass cell", off_grass == 0)
+
+	# 鸡圈里不许长树:地标那几格在撒道具之前就被剔掉了
+	var intruders := 0
+	for entry in props.placed:
+		var kind: String = entry["kind"]
+		if kind == "fence" or kind == "house":
+			continue
+		if _rect_overlaps(entry["cell"], entry["size"], FarmProps.PEN_RECT) \
+				or _rect_overlaps(entry["cell"], entry["size"], FarmProps.HOUSE_RECT):
+			intruders += 1
+	check("nothing grows inside the pen", intruders == 0)
+
+	# 围栏必须真的挡人:每个围栏格都应该是实心的
+	var not_solid := 0
+	for entry in props.placed:
+		if entry["kind"] != "fence":
+			continue
+		if not props.solid_cells.has(entry["cell"]):
+			not_solid += 1
+	check("the fence is solid", not_solid == 0)
+
+	var chickens: Array[Node] = []
+	for child in props.get_node("Props").get_children():
+		if String(child.name).begins_with("Chicken_"):
+			chickens.append(child)
+	check("the pen has chickens", chickens.size() == FarmProps.CHICKEN_COUNT)
+	var inside := 0
+	var animating := 0
+	var roam: Rect2 = props.call("_pen_interior_rect")
+	for chicken in chickens:
+		if roam.has_point(chicken.position):
+			inside += 1
+		var sprite := chicken.get_node_or_null("Sprite") as AnimatedSprite2D
+		if sprite != null and sprite.sprite_frames.has_animation("walk") \
+				and sprite.sprite_frames.get_frame_count("walk") == 2 and sprite.is_playing():
+			animating += 1
+	check("every chicken stays inside the pen", chickens.size() > 0 and inside == chickens.size())
+	check("every chicken is animating from a 2-frame sheet", animating == chickens.size())
+
+
+## 斧 / 镐:规则层(直接调 FarmProps)+ 玩家那条真实链路(选工具 -> 按使用)。
+func _test_gather(props: FarmProps, walker: Player, indicator: Node2D, hud: CanvasLayer) -> void:
+	print("-- axe / pickaxe")
+	var found: Variant = props.first_solid_cell("tree")
+	check("there is a tree to chop", found != null)
+	if found == null:
+		return
+	var tree_cell: Vector2i = found
+	var entry := props.prop_at(tree_cell)
+	var tree_size: Vector2i = entry["size"]
+	var walkable_before := props.walkable_cell_count()
+
+	# 拿错工具应该什么都不发生
+	var wrong := props.use_tool(GameState.Tool.PICKAXE, tree_cell)
+	check("a pickaxe does not fell a tree",
+		String(wrong["item"]) == "" and not props.prop_at(tree_cell).is_empty())
+	check("the pickaxe reports that it is the wrong tool",
+		String(wrong["message"]).contains("rock"))
+
+	# 规则层:砍
+	var result := props.use_tool(GameState.Tool.AXE, tree_cell)
+	check("the axe gives wood", String(result["item"]) == "wood" and int(result["amount"]) == 2)
+	check("the axe fells the whole tree, not just one cell", props.prop_at(tree_cell).is_empty())
+	check("the felled tree leaves no collision behind",
+		not props.solid_cells.has(tree_cell) and not props.blocked.has(tree_cell))
+	check("the felled tree frees all its cells",
+		props.walkable_cell_count() == walkable_before + tree_size.x * tree_size.y)
+
+	# 空地上再敲
+	var empty := props.use_tool(GameState.Tool.AXE, tree_cell)
+	check("chopping empty ground gives nothing",
+		String(empty["item"]) == "" and String(empty["message"]) != "")
+
+	# 石头:镐
+	var found_rock: Variant = props.first_solid_cell("rock")
+	check("there is a rock to mine", found_rock != null)
+	if found_rock != null:
+		var rock_cell: Vector2i = found_rock
+		check("the axe refuses to chop a rock", not props.can_use(GameState.Tool.AXE, rock_cell))
+		check("the pickaxe accepts the rock", props.can_use(GameState.Tool.PICKAXE, rock_cell))
+		var mined := props.use_tool(GameState.Tool.PICKAXE, rock_cell)
+		check("the pickaxe gives stone",
+			String(mined["item"]) == "stone" and int(mined["amount"]) == 1)
+		check("the mined rock is gone", props.prop_at(rock_cell).is_empty())
+
+	# 玩家那条链路:摆在树下面朝上,选斧头 -> 按一次使用
+	var another: Variant = props.first_solid_cell("tree")
+	check("there is still a tree for the player to chop", another != null)
+	if another == null or indicator == null:
+		return
+	var target: Vector2i = another
+	# 摆位必须从**农田那套格坐标**算,不能直接把身体放到「树下面那一格的中心」:
+	# 目标格是用脚下那个碰撞圆(身上偏下 6px)算的,两套格坐标的偏移又不是整格,
+	# 直接放会差出整整一格(第一次就是这么栽的:目标变成了树的**下面**一格)。
+	# 所以:先把「农田 (0,0) 对应 props 哪一格」问出来,再推对面那一格。
+	var plot_offset := walker.props_cell_of(Vector2i.ZERO)
+	var standing_plot := target - plot_offset + Vector2i(0, 1)
+	walker.global_position = walker.farm_plot.cell_center(standing_plot)
+	walker.set_facing(Vector2.UP)
+	var faced := walker.target_cell()
+	check("the player faces the tree",
+		String(props.prop_at(walker.props_cell_of(faced)).get("kind", "")) == "tree")
+
+	GameState.select_tool(GameState.Tool.HOE)
+	check("a hoe cannot work on a tree", not walker.props_actionable(faced))
+	await get_tree().process_frame
+	check("the indicator stays dim with a hoe", not bool(indicator.get("_actionable")))
+
+	GameState.select_tool(GameState.Tool.AXE)
+	check("the axe can work on the tree", walker.props_actionable(faced))
+	await get_tree().process_frame
+	check("the indicator points at the tree", indicator.call("target_cell") == faced)
+	check("the indicator lights up on a choppable tree", bool(indicator.get("_actionable")))
+
+	var wood_before := GameState.item_count("wood")
+	walker.use_current_tool()
+	check("chopping through the player adds wood to the inventory",
+		GameState.item_count("wood") == wood_before + 2)
+	check("the player's chop removed the tree from the map",
+		props.prop_at(walker.props_cell_of(faced)).is_empty())
+
+	# HUD 的材料格必须跟着显示出来
+	var wood_label := hud.get_node("Materials/Slots").get_child(0).get_node("Count") as Label
+	check("the HUD shows the chopped wood", wood_label.text == str(GameState.item_count("wood")))
+
+	await get_tree().process_frame
+	check("the indicator goes dim once the tree is gone", not bool(indicator.get("_actionable")))
+
+
+## 池塘:岛内「没有草」的那些格就是塘 —— 玩家不许走进去,而且要正好停在塘边。
+func _test_ponds(map: Node, props: FarmProps, walker: Player, farm: FarmPlot) -> void:
+	print("-- ponds")
+	var grass_layer: TileMapLayer = map.get_node("GameTilemap/grass")
+	var cells := grass_layer.get_used_cells()
+	var low := cells[0]
+	var high := cells[0]
+	for cell in cells:
+		low = Vector2i(mini(low.x, cell.x), mini(low.y, cell.y))
+		high = Vector2i(maxi(high.x, cell.x), maxi(high.y, cell.y))
+	var grass := {}
+	for cell in cells:
+		grass[cell] = true
+
+	# 岛本身是个规整矩形(岸的外圈不在这个矩形里),所以矩形内非草 = 池塘
+	var holes: Array[Vector2i] = []
+	for x in range(low.x, high.x + 1):
+		for y in range(low.y, high.y + 1):
+			if not grass.has(Vector2i(x, y)):
+				holes.append(Vector2i(x, y))
+	check("the island has ponds carved into it", holes.size() > 100)
+
+	var plot_rect := Rect2(farm.global_position, Vector2(farm.columns, farm.rows) * 16.0)
+	var in_plot := 0
+	for hole in holes:
+		if plot_rect.has_point(grass_layer.to_global(grass_layer.map_to_local(hole))):
+			in_plot += 1
+	check("no pond runs through the farm plot", in_plot == 0)
+
+	# 找一个「塘格 + 旁边的草格」的配对(优先左右向:玩家脚下那个碰撞圆在
+	# 身上偏下 6px,竖直推的话两个轴的期望值算法不一样,左右向最干净)
+	var pond_cell := Vector2i.ZERO
+	var grass_cell := Vector2i.ZERO
+	var push := Vector2.ZERO
+	for side in [[Vector2i(1, 0), Vector2i(-1, 0)], [Vector2i(0, 1), Vector2i(0, -1)]]:
+		for hole in holes:
+			for step in side:
+				if grass.has(hole + step):
+					pond_cell = hole
+					grass_cell = hole + step
+					push = -Vector2(step)
+					break
+			if push != Vector2.ZERO:
+				break
+		if push != Vector2.ZERO:
+			break
+	check("found a pond edge to push against", push != Vector2.ZERO)
+	if push == Vector2.ZERO:
+		return
+
+	var start: Vector2 = grass_layer.to_global(grass_layer.map_to_local(grass_cell))
+	walker.global_position = start
+	(walker.get_node("StateMachine") as NodeFiniteStateMachine).on_state_transition("idle")
+	for i in 60:
+		await get_tree().physics_frame
+		walker.velocity = push * Player.SPEED
+		walker.move_and_slide()
+	walker.velocity = Vector2.ZERO
+
+	# 比的是**脚下那个碰撞圆**的圆心(身上偏下 6px),不是身体中心 ——
+	# 竖直推的时候这两个差 6px,拿身体中心比会差出一大截。
+	var radius := ((walker.get_node("CollisionShape2D") as CollisionShape2D).shape as CircleShape2D).radius
+	var pond_rect := Rect2(
+		grass_layer.to_global(grass_layer.map_to_local(pond_cell)) - Vector2(8, 8), Vector2(16, 16))
+	var stopped := walker.cell_anchor_position()
+	# 圆不能和塘口重叠
+	check("the pond water is solid", not pond_rect.grow(radius - 1.0).has_point(stopped))
+	check("the player actually walked to the pond", stopped.distance_to(start) > 6.0)
+
+	# 还要正好贴在塘边(不是被什么别的东西提前挡住)
+	var along_x := push.x != 0.0
+	var edge := 0.0
+	if along_x:
+		edge = pond_rect.end.x + radius if push.x < 0.0 else pond_rect.position.x - radius
+	else:
+		edge = pond_rect.end.y + radius if push.y < 0.0 else pond_rect.position.y - radius
+	var actual := stopped.x if along_x else stopped.y
+	print("      池塘: 塘格 %s, 从 %s 推 %s, 圆心停在 %.1f, 期望 %.1f, 差 %.1f" % [
+		pond_cell, grass_cell, push, actual, edge, absf(actual - edge)])
+	check("the pond wall is flush with the water edge (within 1.5px)", absf(actual - edge) <= 1.5)
+
+
+## 两个格坐标矩形有重叠吗(左上角 + 尺寸那一套)
+func _rect_overlaps(cell: Vector2i, size: Vector2i, rect: Rect2i) -> bool:
+	return Rect2i(cell, size).intersects(rect)
 
 
 ## 直接量「字形到底画在哪一行」。
@@ -901,9 +1165,14 @@ func _check_hud_layout(hud: CanvasLayer) -> void:
 		check("the day label text is not clipped at the top", first > int(label_rect.position.y))
 		check("the day label text fits inside its rect", last < int(label_rect.end.y))
 
-	for panel_path in ["TopBar", "BottomBar"]:
+	for panel_path in ["TopBar", "BottomBar", "ToolBar", "Materials", "Backpack"]:
 		var panel: Control = hud.get_node(panel_path)
 		var rect := panel.get_global_rect()
+		# 面板必须真的装得下里面的东西。工具从 4 把变成 6 把以后,工具条比原来的面板宽
+		# 66px —— PanelContainer 会自己长大,但长大的是**面板**还是被裁掉,不看不知道。
+		if panel.get_child_count() > 0 and panel.get_child(0) is Control:
+			check("%s contains its contents" % panel_path,
+				rect.encloses((panel.get_child(0) as Control).get_global_rect()))
 		for child in panel.find_children("*", "Label", true, false):
 			var child_rect: Control = child
 			check("%s/%s stays inside its panel" % [panel_path, child.name],
@@ -930,7 +1199,17 @@ func _check_hud_layout(hud: CanvasLayer) -> void:
 		check("tool slot icon fits the slot", icon.size.x <= slot.size.x and icon.size.y <= slot.size.y)
 		if icon.texture != null:
 			icons.append(icon.texture)
-	check("the four tool icons are not all the same tool", _distinct_icon_count(icons) == 4)
+	check("the tool icons are not all the same tool", _distinct_icon_count(icons) == 6)
+	# 材料格(木头 / 石头):砍了树得看得到东西,不然按下去像没反应
+	var material_slots := hud.get_node("Materials/Slots")
+	check("the HUD has one material slot per material",
+		material_slots.get_child_count() == GameState.MATERIAL_ORDER.size())
+	var material_icons := 0
+	for slot in material_slots.get_children():
+		for child in slot.get_children():
+			if child is ItemIcon and (child as ItemIcon).texture != null:
+				material_icons += 1
+	check("every material slot has an icon", material_icons == GameState.MATERIAL_ORDER.size())
 
 
 ## 在帧画面的某个矩形里,哪些行有「文字墨迹」(接近白色)。返回行号列表。

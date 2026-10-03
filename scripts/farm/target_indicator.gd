@@ -21,7 +21,7 @@ extends Node2D
 var player: Player
 var plot: FarmPlot
 
-## 框在当前格上的两种状态:可操作(在农田里)/ 不可操作(出界)
+## 框在当前格上的两种状态:可操作(在农田里,或斧/镐对着一棵树)/ 不可操作(出界)
 const ACTIONABLE_FILL := Color(1.0, 1.0, 1.0, 0.16)
 const ACTIONABLE_LINE := Color(1.0, 0.96, 0.72, 0.85)
 const IDLE_LINE := Color(0.55, 0.60, 0.62, 0.30)
@@ -58,7 +58,10 @@ func _refresh() -> void:
 	if player == null or plot == null:
 		return
 	var cell := player.target_cell()
-	var actionable := plot.has_cell(cell)
+	# 可操作 = 在农田里,或者手上是斧/镐且目标格上站着能砍/能挖的东西。
+	# 后者问的是 Player(它才知道农田格算到场景格是第几格),
+	# 且非斧/镐时直接短路,不会每帧遍历几百个道具。
+	var actionable := plot.has_cell(cell) or player.props_actionable(cell)
 	if cell == _cell and actionable == _actionable:
 		return
 	_cell = cell
