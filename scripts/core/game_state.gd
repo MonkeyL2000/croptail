@@ -23,6 +23,9 @@ const STARTING_COINS := 10
 signal tool_changed(tool_id: int)
 signal inventory_changed()
 signal coins_changed(coins: int)
+## 选中的作物变了。和 inventory_changed 分开:背包刷新关心数量,
+## 而 HUD 的「收获图标」只关心当前是哪一种作物。
+signal crop_changed(crop_id: String)
 
 var current_tool: int = Tool.HOE
 var selected_crop: String = "wheat"
@@ -65,6 +68,7 @@ func select_crop(crop_id: String) -> void:
 	if selected_crop == crop_id:
 		return
 	selected_crop = crop_id
+	crop_changed.emit(selected_crop)
 	inventory_changed.emit()
 
 

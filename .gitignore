@@ -7,6 +7,16 @@
 /export/
 *.translation
 
+# 开发时用 tools/annotate_sheet.py 生成的对照图在 docs/art/ 里(要提交);
+# 临时截图 / 临时看图不提交
+/screenshots/
+*_view.png
+*_frames.png
+
+# Python 工具产物
+__pycache__/
+*.pyc
+
 # 编辑器 / 系统
 *.tmp
 *.orig

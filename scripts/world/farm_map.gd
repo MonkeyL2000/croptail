@@ -16,6 +16,24 @@ func _ready() -> void:
 	_build_water_walls()
 
 
+## 草地的世界矩形(含草地本身在内的最小矩形)。
+## 相机用它当移动范围:地图 57x34 格 = 912x544 像素,比 640x360 的视口大得多,
+## 没有相机就只看得到岛的一角。
+func playable_rect() -> Rect2:
+	var cells := grass.get_used_cells()
+	if cells.is_empty():
+		return Rect2()
+	var min_cell := cells[0]
+	var max_cell := cells[0]
+	for cell in cells:
+		min_cell = Vector2i(mini(min_cell.x, cell.x), mini(min_cell.y, cell.y))
+		max_cell = Vector2i(maxi(max_cell.x, cell.x), maxi(max_cell.y, cell.y))
+	# map_to_local 给的是格子中心,向左上退半格才是格子外沿
+	var top_left: Vector2 = grass.to_global(grass.map_to_local(min_cell)) - Vector2(CELL_SIZE, CELL_SIZE) * 0.5
+	var bottom_right: Vector2 = grass.to_global(grass.map_to_local(max_cell)) + Vector2(CELL_SIZE, CELL_SIZE) * 0.5
+	return Rect2(top_left, bottom_right - top_left)
+
+
 ## 被草地盖住的水格不算墙(玩家就站在草上),其余水格按行合并成矩形
 func _build_water_walls() -> void:
 	var grass_cells := {}

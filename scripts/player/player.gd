@@ -16,6 +16,7 @@ var farm_plot: FarmPlot
 var facing: Vector2 = Vector2.DOWN
 
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
+@onready var camera: Camera2D = $Camera2D
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -62,6 +63,28 @@ func play_anim(prefix: String) -> void:
 	var animation := "%s_%s" % [prefix, dir_suffix()]
 	if animated_sprite.animation != animation or not animated_sprite.is_playing():
 		animated_sprite.play(animation)
+
+
+## 按工具播放使用动作。
+##
+## 动作图集里每个工具有一套独立的挥舞动作。以前四个工具都放同一套
+## (而且帧坐标还越界了),现在按 GameState.current_tool 选。
+## 帧怎么切、哪个工具用哪个动作块,见 `tools/gen_player_scene.py` 里的注释。
+func play_use_anim(tool_id: int) -> void:
+	if animated_sprite == null:
+		return
+	var action := "front"
+	if facing == Vector2.UP:
+		action = "back"
+	elif facing == Vector2.LEFT:
+		action = "left"
+	elif facing == Vector2.RIGHT:
+		action = "right"
+	var animation := "use_%d_%s" % [tool_id + 1, action]
+	if animated_sprite.sprite_frames.has_animation(animation):
+		animated_sprite.play(animation)
+	else:
+		play_anim("idle")
 
 
 ## 玩家面前的那一格(以玩家身体为基准,往前一格)
