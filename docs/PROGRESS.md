@@ -17,6 +17,8 @@
 | 截图工具 | `res://scenes/dev/screenshot.tscn` → `res://screenshots/shot_*.png` |
 | 地形整图 | `python tools/render_map.py docs/art/map.png`(离线合成,看草坪对不对看这张) |
 | 素材对照图 | `python tools/annotate_objects.py` → `docs/art/tools_objects.png`(把代码认定的名字写在斧/镐/围栏/鸡舍的放大图上,人工核对用) |
+| **道具对照图** | `python tools/annotate_props.py` → `docs/art/props_sheet.png`(`prop_db.gd` 里每条 rect 描边 + 编号 + 名字/kind/占地;怀疑「素材放错了」时看这张) |
+| 道具表体检 | `python tools/check_props.py`(每条 rect 是不是**只有一个精灵** + kind 和调色板对不对,退出码 0 = 全过) |
 | 动作版式图 | `python tools/annotate_actions.py` → `docs/art/actions_groups.png`(3 个动作组 x 4 个朝向,人工核对用) |
 | 地形图块重算 | `res://scenes/dev/retile.tscn`(改了地图形状后要跑;先自校验参考图) |
 | 地图速览 | `res://scenes/dev/map_dump.tscn`(打 ASCII 地图) |
@@ -24,7 +26,7 @@
 | 地图 | `res://scenes/world/farm_map.tscn`(1764 格草 + 3312 格水,72x46 格;草地层被 `tools/carve_ponds.py` 挖了 3 个池塘 = 174 格)。改完形状要重跑 `res://scenes/dev/retile.tscn`,否则新格子的图块是错的 |
 | 池塘 | 3 个椭圆(带 sin 抖动边),**水是露出来的**:删掉草地格就见到下面的水层,岸边不用过渡素材;塘口自动被水墙围上(见 `docs/DECISIONS.md#ponds`) |
 | 地标 | 围栏圈 + 鸡舍 + 2 只鸡,`farm_props.gd::_place_landmarks()` 手摆(`PEN_RECT`/`HOUSE_RECT`),手摆的格子在撒道具前就写进 `reserved` |
-| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~350 个随机道具 + 18 段围栏 + 1 鸡舍,碰撞从贴图 alpha 现算。斧/镐能敲掉它们(tree/wood → 木头,rock → 石头) |
+| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~350 个随机道具 + 18 段围栏 + 1 鸡舍,碰撞从贴图 alpha 现算。表里 **47 条**:树 3 / 石头 6 / 木头(含树桩)7 / 花草灌木 26 / 围栏 4 / 鸡舍 1。斧/镐能敲掉它们(tree → +2 木,wood → +1 木,rock → +1 石)。**一条 rect = 一个精灵**,图集里挨着的邻居不许被圈进来(见 `docs/DECISIONS.md#prop-art-rects`) |
 | 工具 | 6 把:锄/水壶/种子/收获(作用在农田)+ 斧/镐(作用在地面物件)。斧/镐的名字是**像素推断**的,见 `docs/DECISIONS.md#gather-tools` 和 `docs/art/tools_objects.png` |
 | TileSet | `res://tilesets/test_tilemap.tres`(旧名沿用;水墙碰撞由 `farm_map.gd` 运行时生成) |
 | 玩家 | `res://scenes/characters/player.tscn`(32 个动画 = idle/walk x 4 朝向 + 6 把工具 x 4 朝向;由 `tools/gen_player_scene.py` 生成) |
@@ -170,6 +172,22 @@
     结果差**一整格**(两套格坐标偏移不是整格 + 脚下圆比身体中心低 6px),
     得从 `props_cell_of(Vector2i.ZERO)` 问出偏移;比 `AtlasTexture` 用 `==` 会报假 FAIL,
     得逐像素比。都记在 `DECISIONS.md#test-placement-frames`。
+- [x] **2026-10-03 修「有些树好像倒下了,素材放的不对,树应该可以被砍」**:
+      根因是道具 rect 的**邻居被圈进来了**(连通域涨水会把挨着摆的两块精灵粘成一块),
+      细节和规矩写在 `docs/DECISIONS.md#prop-art-rects`。具体:
+  - `tree_autumn`(kind tree + solid,28px 高)其实是一株**麦子** —— 麦穗 + 叶子被糊成一条,
+    撒到场上就是一坨倒在地上的东西还挡路;现在改名 `wheat_plant`(deco,不挡路)。
+  - `bush_low` / `bush_wide_alt` 的右边**粘了一截树桩** —— 这就是画面上的「倒下的树」,
+    而且灌木是 deco(敲它没反应)。两截树桩现在单独登记成 `stump_log` / `stump_tiny`
+    (kind `wood`,斧头能砍),灌木矩形切到邻居之前。
+  - 三朵**大粉花**被当成石头(`rock_mossy`/`rock_pile`/`rock_wide`,还标了 solid —— 
+    玩家会撞在花上);反过来四块真灰石被标成了灌木。现在石头 6 种全是灰的,花 14 种全是 deco。
+  - 22 条 rect 一律**少了最下面一行**(`max_y - min_y` 少加 1),树和灌木脚下的阴影被切掉。
+  - 新增**离线体检** `tools/check_props.py` 和**人肉对照图** `docs/art/props_sheet.png`;
+    引擎侧新增 `_test_prop_art()`(调色板判 kind + 「不许粘邻居」)
+    和 `_test_every_wood_variant_is_choppable()`(按变体名把 10 种树/木头全砍一遍)。
+  - **自检 223 → 231 项**,截图复核:地形/土块和改动前**逐像素一致**(156290 个地形像素里只有 77 个变),
+    变化全在道具和 HUD 上 —— 说明改的只有素材。
 
 ## Next(按顺序做)
 
@@ -212,41 +230,45 @@
 - 自检里**合成按键不可靠**(会时灵时不灵),验物理的用例不要依赖它;
   另有「格坐标跨节点混用」的坑 —— 见 `DECISIONS.md#synthetic-input`、`#frame-mixing`、
   `#test-placement-frames`(摆玩家、比贴图都各踩过一次)。
+- ⚠️ **待确认 3**:`prop_db.gd` 里那 47 条道具的**名字**是像素推断的(素材包没有图例)。
+  最没把握的几条:`wheat_plant`(金黄色穗子 + 细叶,原名叫 tree_autumn)、`stump_log` /
+  `stump_tiny`(全是木色,7x7 / 8x9)、`rock_mossy`(带苔的灰石)。
+  对照图:`docs/art/props_sheet.png`(每条 rect 描边 + 编号,下面列出名字/kind/rect)。
+  名字只影响可读性,**不影响玩法** —— kind 已经按调色板定过,自检会钉住。
 - 没有音频素材(原包里就没有)。
 
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
-  → **`=== SELFTEST END: 223 checks, 0 failed ===`**,ERROR 区为空。本轮新增的关键几条:
-  - `the axe fells the whole tree, not just one cell` + `the felled tree frees all its cells`
-    (可站立格数正好多出 `size.x * size.y`)
-  - `chopping through the player adds wood to the inventory` + `the HUD shows the chopped wood`
-    —— 走完「选工具 → 面朝树 → 按使用 → 图标/数字跟着变」整条链路
-  - `the indicator lights up on a choppable tree` / `...goes dim once the tree is gone`
-  - `every fence piece stands on a grass cell`(围栏漂到水里也能看着像正常)
-  - `nothing grows inside the pen` / `every chicken stays inside the pen`
-  - `every chicken is animating from a 2-frame sheet`
-  - `the island has ponds carved into it` + `the pond wall is flush with the water edge`
-    (塘格 (-13,20),从 (-14,20) 推 (1,0),圆心停在 -221.0,期望 -221.0,**差 0.0px**)
-  - `only the axe and the pickaxe work on props`(工具→适用对象就这一处判断)
-  - `ToolBar contains its contents`(工具从 4 把变 6 把,面板得自己长大)
-  - 上一轮那些回归依然全绿(`the soil sprite covers exactly its own cell`、
-    `tilling repaints nothing outside that cell` 256/256、`each direction of a tool uses its own atlas row`、
-    `left frames are the exact mirror of the right frames (12 frames)`、
-    `water wall is flush with the shore (within 1px)` 草沿 -264/玩家 -259 零抖动、字体探针 `D` 墨迹 3..11)
-- `scripts/dev/retile.gd` → **`REFERENCE CHECK: PASS`**(263 格标准答案 0 差异;池塘后的新表已写回 `farm_map.tscn`)
-- `python tools/render_map.py docs/art/map.png` → 1152x736 整张地形图;
-  `python tools/annotate_terrain.py` → `docs/art/terrain_*.png`;
-  `python tools/annotate_objects.py` → `docs/art/tools_objects.png`(斧/镐/围栏/鸡舍的对照图)
-- `run_project {scene: "res://scenes/dev/screenshot.tscn"}` → `screenshots/shot_1..3.png`(像素复核):
-  - shot_3 里预测的池塘屏幕范围内 18319 px 是水色 `(155,212,195)`(塘外一个都没有),
-    另一个塘也对上了 —— 池塘确实画出来了
-  - shot_2 围栏屏幕矩形里检出 2 团鸡身奶油色 `(243,242,192)`(围栏/鸡舍调色板里没这个色)
-  - 锄满农田后土块包围盒 = 农田外框 (192x112) 依然一分不差
+  → **`=== SELFTEST END: 231 checks, 0 failed ===`**,ERROR 区为空。本轮新增的关键几条:
+  - `no prop rect has a neighbour glued in (47 rects)` —— 主色家族 ∪ 阴影的包围盒必须等于 rect
+  - `every prop kind matches its palette`(`rock` 必须灰且粉 ≤5%、`wood` 必须木色、`tree` 必须有绿冠 + 木干)
+  - `no prop sprite is bigger than its footprint cells` / `no decor prop is solid`
+  - `every tree / wood variant found in the world can be chopped (10 of 10 variants, 0 refused)`
+    —— 按**变体名**遍历,把世界里出现的每一种树/木头都真砍一遍(只测一棵会漏掉 kind 写错的变体)
+- `python tools/check_props.py` → **`0 problems, 0 warnings`**(47/47 干净;两张图集里的精灵全部已登记)
+- `python tools/annotate_props.py` → `docs/art/props_sheet.png`(1304x1286,人工核对用)
+- 截图复核:`run_project {scene: "res://scenes/dev/screenshot.tscn"}` → `screenshots/shot_1..3.png`,
+  和改动前的三张逐像素比:**地形 + 农田土块完全一致**
+  (两张图共有 156290 个「草地/水/土」像素,其中只有 **77** 个变;
+  锄满农田后土块在预测矩形 (304,66)-(496,178) = 192x112 里的像素数两轮都是 21248),
+  差异全落在道具和 HUD 文字上 —— 说明改的只有素材。
 - 主场景 `run_project {projectPath: "D:\\godot_projects\\croptail"}`:仅
-  `[farm_props] 347 props (83 tree / 35 rock / 27 wood / 183 deco / 18 fence / 1 house) ... 1730 collision boxes`
-  + `[farm_map] water walls: 101 collision shapes`,**无 ERROR**(水墙从 76 增到 101 = 塘口围上了)
+  `[farm_props] 347 props (83 tree / 35 rock / 27 wood / 183 deco / 18 fence / 1 house) on 1587 open cells; 1587 collision boxes`
+  + `[farm_map] water walls: 101 collision shapes`,**无 ERROR**
+- 上一轮那些回归依然全绿(`the axe fells the whole tree, not just one cell`、
+  `the soil sprite covers exactly its own cell`、`tilling repaints nothing outside that cell` 256/256、
+  `every fence piece stands on a grass cell`、`every chicken is animating from a 2-frame sheet`、
+  `the pond wall is flush with the water edge` 差 0.0px、`water wall is flush with the shore` 草沿 -264/玩家 -259)
+- `scripts/dev/retile.gd` → **`REFERENCE CHECK: PASS`**(263 格标准答案 0 差异;本轮没改地图形状)
+- 上一轮(斧/镐 + 池塘 + 地标)的证据仍然成立:池塘截图里预测范围内的 18319 px
+  全是水色 `(155,212,195)`、shot_2 围栏里检出 2 团鸡身奶油色 `(243,242,192)`、
+  `the island has ponds carved into it` 等 21 条斧/镐用例。
+- 离线工具:`python tools/render_map.py docs/art/map.png`(1152x736 整张地形图)、
+  `python tools/annotate_terrain.py`(`docs/art/terrain_*.png`)、
+  `python tools/annotate_objects.py`(`docs/art/tools_objects.png`,斧/镐/围栏/鸡舍对照图)
 - 日期:2026-10-03
+
 
 ## 待补的记录
 

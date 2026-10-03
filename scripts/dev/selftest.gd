@@ -8,6 +8,42 @@ extends Node2D
 ##
 ## 跑法:run_project {scene: "res://scenes/dev/selftest.tscn"}
 
+## 道具素材的调色板分家族(和离线工具 `tools/check_props.py` 用的是同一张表)。
+##
+## 为什么要在引擎里再存一份:图集里**有些精灵是紧挨着摆的**(灌木右边挨着一截
+## 树桩、麦穗长在叶子上),拿连通域自动量包围盒就会把邻居圈进来。这种错**不会
+## 报任何错**,只是画面上凭空多出一截木头 —— 逻辑测试全绿也照样错。
+## 所以这里把「一条 rect 里只能有它自己那一族颜色」变成断言,改坏就红。
+## 所有精灵脚下那团半透明阴影:(80, 64, 134, a=30)。它单独一族,不参与判断。
+const SHADOW_TINT := Color8(80, 64, 134, 30)
+
+const PROP_PALETTE := {
+	"green": [
+		Color8(151, 187, 142), Color8(110, 150, 124), Color8(174, 212, 153), Color8(95, 122, 121),
+		Color8(103, 131, 92), Color8(194, 224, 154), Color8(141, 177, 93), Color8(192, 212, 112),
+		Color8(120, 161, 88), Color8(130, 168, 132), Color8(107, 116, 112), Color8(86, 101, 96)
+	],
+	"wood": [
+		Color8(196, 154, 108), Color8(182, 137, 98), Color8(170, 121, 89), Color8(144, 98, 93),
+		Color8(220, 185, 138), Color8(149, 122, 75), Color8(232, 207, 166), Color8(117, 76, 96)
+	],
+	"stone": [
+		Color8(129, 139, 131), Color8(193, 200, 185), Color8(157, 168, 154), Color8(176, 185, 171),
+		Color8(84, 89, 89), Color8(84, 87, 94), Color8(243, 244, 231), Color8(243, 216, 197)
+	],
+	"pink": [
+		Color8(138, 74, 112), Color8(189, 117, 126), Color8(175, 103, 118), Color8(163, 91, 112),
+		Color8(217, 154, 154), Color8(232, 181, 172), Color8(105, 74, 135), Color8(144, 104, 159),
+		Color8(167, 123, 179), Color8(88, 63, 131), Color8(113, 57, 112), Color8(85, 87, 147),
+		Color8(95, 105, 156), Color8(113, 128, 177), Color8(80, 94, 119), Color8(146, 178, 212),
+		Color8(203, 224, 222)
+	],
+	"yellow": [
+		Color8(234, 225, 120), Color8(176, 150, 67), Color8(212, 193, 105), Color8(191, 169, 84),
+		Color8(238, 238, 155), Color8(244, 244, 160)
+	],
+}
+
 var _checks: int = 0
 var _failures: int = 0
 
@@ -814,9 +850,11 @@ func _test_main_scene() -> void:
 		_dump_shore(main, main_props, main_player)
 
 	await _test_tree_blocks_player(main_props, main_player)
-	_test_landmarks(main_props, main)
+	_test_landmarks(main_props)
 	await _test_gather(main_props, main_player, indicator, main.get_node("HUD"))
-	_test_ponds(map, main_props, main_player, main_plot)
+	_test_ponds(map, main_player, main_plot)
+	_test_prop_art()
+	_test_every_wood_variant_is_choppable(main_props)
 
 
 ## 手摆地标:围栏圈 / 鸡舍 / 鸡。
@@ -825,7 +863,7 @@ func _test_main_scene() -> void:
 ## 而道具占用簿(blocked / solid_cells)是 props 自己那套。两套差半格的话,
 ## 围栏会整排漂到水里(岛外面全是一片水,看起来还挺正常),而且
 ## 碰撞墙也跟着漂 —— 玩家会撞到看不见的东西。
-func _test_landmarks(props: FarmProps, main: Node) -> void:
+func _test_landmarks(props: FarmProps) -> void:
 	print("-- landmarks (fence pen / coop / chickens)")
 	check("the pen is fenced", props.count_kind("fence") >= 14)
 	check("there is a chicken house", props.count_kind("house") == 1)
@@ -966,8 +1004,208 @@ func _test_gather(props: FarmProps, walker: Player, indicator: Node2D, hud: Canv
 	check("the indicator goes dim once the tree is gone", not bool(indicator.get("_actionable")))
 
 
+## 把每一种树 / 木头都真的砍一遍。
+##
+## 用户报过「有些树好像倒下了,素材放的不对,树应该可以被砍」。只测
+## `first_solid_cell("tree")` 那一种,漏掉的正是「某一个变体的 kind 写错了」
+## (比如 `tree_autumn` 其实是一株麦子却挂着 tree + solid)。所以这里按
+## **变体名**遍历:图集里每一棵树都必须能被斧头砍倒。
+func _test_every_wood_variant_is_choppable(props: FarmProps) -> void:
+	print("-- every tree / wood variant can be chopped")
+	var tried := {}
+	var chopped := 0
+	var refused := 0
+	for entry in props.placed.duplicate():
+		var kind: String = entry["kind"]
+		if kind != "tree" and kind != "wood":
+			continue
+		var prop_name: String = entry["name"]
+		if tried.has(prop_name):
+			continue
+		tried[prop_name] = true
+		var cell: Vector2i = entry["cell"]
+		if not props.can_use(GameState.Tool.AXE, cell):
+			refused += 1
+			print("      %s refuses the axe at %s" % [prop_name, cell])
+			continue
+		var result := props.use_tool(GameState.Tool.AXE, cell)
+		if String(result["item"]) != "wood":
+			refused += 1
+			print("      %s gave '%s' instead of wood" % [prop_name, result["item"]])
+		else:
+			chopped += 1
+
+	var variants := PropDB.names_of_kind("tree").size() + PropDB.names_of_kind("wood").size()
+	check("every tree / wood variant found in the world can be chopped (%d of %d variants, %d refused)"
+		% [chopped, variants, refused], refused == 0 and chopped >= variants)
+
+
+## 素材表的体检(引擎侧,和 `tools/check_props.py` 同一个判据)。
+##
+## 三条不变量:
+##   1. 每条 rect 都在图集里;
+##   2. rect 里**只有它自己那一族颜色** —— 把「主色族 + 半透明阴影」的包围盒
+##      算出来,不该比 rect 还大(大了说明矩形把邻居精灵圈进来了);
+##   3. kind 和调色板对得上:石头必须是灰的(不能是粉花)、木头必须是木色、
+##      树必须有绿树冠 + 木树干。粉色只允许出现在 deco 上。
+func _test_prop_art() -> void:
+	print("-- prop art (one rect = one sprite)")
+	var images := {}
+	var glued := 0
+	var mislabelled := 0
+	var out_of_bounds := 0
+	var seen := {}
+	var checked := 0
+	for prop_name in PropDB.PROPS:
+		var entry: Dictionary = PropDB.PROPS[prop_name]
+		var sheet_name: String = entry["sheet"]
+		var path: String = PropDB.SHEETS[sheet_name]
+		if not images.has(path):
+			images[path] = (load(path) as Texture2D).get_image()
+		var image: Image = images[path]
+		var rect: Rect2 = entry["rect"]
+		if rect.position.x < 0.0 or rect.position.y < 0.0 \
+				or rect.end.x > image.get_width() or rect.end.y > image.get_height():
+			out_of_bounds += 1
+			print("      %s rect %s runs outside %s" % [prop_name, rect, path])
+			continue
+		var key := "%s:%s" % [sheet_name, rect]
+		if seen.has(key):
+			print("      %s and %s share rect %s" % [seen[key], prop_name, rect])
+		seen[key] = prop_name
+		checked += 1
+		# 围栏是拼图块(横杆本来就伸到格子外),鸡舍是一整张图 —— 都不适用
+		if sheet_name == "fence" or sheet_name == "house":
+			continue
+		var counts := _prop_family_counts(image, rect)
+		var main := _prop_main_family(counts)
+		if main == "":
+			continue
+		var own := _prop_family_bbox(image, rect, main)
+		if own.position.x < rect.position.x - 1.0 or own.position.y < rect.position.y - 1.0 \
+				or own.size.x > rect.size.x + 2.0 or own.size.y > rect.size.y + 2.0:
+			glued += 1
+			print("      %s rect %s holds a foreign sprite (own art is %s)"
+				% [prop_name, rect, own])
+		if not _prop_kind_matches_palette(entry["kind"], counts):
+			mislabelled += 1
+			print("      %s is kind '%s' but its palette looks like %s"
+				% [prop_name, entry["kind"], _prop_shares(counts)])
+
+	check("every prop rect is inside its sheet", out_of_bounds == 0)
+	check("no prop rect has a neighbour glued in (%d rects)" % checked, glued == 0)
+	check("no two props share a rect", seen.size() == checked)
+	check("every prop kind matches its palette", mislabelled == 0)
+	# 贴图不能比占地大:大了就会糊到隔壁格上(碰撞箱是按格算的,两边就对不上了)
+	var oversize := 0
+	var solid_deco := 0
+	for prop_name in PropDB.PROPS:
+		var entry: Dictionary = PropDB.PROPS[prop_name]
+		var rect: Rect2 = entry["rect"]
+		var cells := PropDB.footprint(prop_name)
+		if rect.size.x > cells.x * 16 or rect.size.y > cells.y * 16:
+			oversize += 1
+			print("      %s is %s px but only %d cells" % [prop_name, rect.size, cells.x * cells.y])
+		if entry["kind"] == "deco" and bool(entry["solid"]):
+			solid_deco += 1
+	check("no prop sprite is bigger than its footprint cells", oversize == 0)
+	check("no decor prop is solid", solid_deco == 0)
+	var thin: Array[String] = []
+	for kind in PropDB.SCATTER_KINDS:
+		if PropDB.names_of_kind(kind).size() < 2:
+			thin.append(kind)
+	check("every scattered kind has at least 2 variants", thin.is_empty())
+
+
+## 只按颜色家族数一数(阴影单独一族;透明的不算)。
+func _prop_family_counts(image: Image, rect: Rect2) -> Dictionary:
+	var counts := {}
+	for y in range(int(rect.position.y), int(rect.end.y)):
+		for x in range(int(rect.position.x), int(rect.end.x)):
+			var family := _prop_family(image.get_pixel(x, y))
+			if family != "":
+				counts[family] = int(counts.get(family, 0)) + 1
+	return counts
+
+
+## 主色族 = 数量最多的那一族(阴影不算,它在所有精灵脚下)。
+func _prop_main_family(counts: Dictionary) -> String:
+	var best := ""
+	var best_count := 0
+	for family in counts:
+		if family == "shadow":
+			continue
+		if int(counts[family]) > best_count:
+			best = family
+			best_count = int(counts[family])
+	return best
+
+
+## 主色族(含阴影)在图集里占的包围盒 —— 应当就是这条 rect 本身。
+func _prop_family_bbox(image: Image, rect: Rect2, family: String) -> Rect2:
+	var low := Vector2i(1 << 30, 1 << 30)
+	var high := Vector2i(-1, -1)
+	for y in range(int(rect.position.y), int(rect.end.y)):
+		for x in range(int(rect.position.x), int(rect.end.x)):
+			var got := _prop_family(image.get_pixel(x, y))
+			if got != family and got != "shadow":
+				continue
+			low = Vector2i(mini(low.x, x), mini(low.y, y))
+			high = Vector2i(maxi(high.x, x), maxi(high.y, y))
+	if high.x < low.x:
+		return Rect2(rect.position, Vector2.ZERO)
+	return Rect2(Vector2(low), Vector2(high - low + Vector2i.ONE))
+
+
+func _prop_shares(counts: Dictionary) -> String:
+	var total := 0
+	for family in counts:
+		total += int(counts[family])
+	if total == 0:
+		return "empty"
+	var parts: Array[String] = []
+	for family in counts:
+		parts.append("%s:%d%%" % [family, roundi(float(counts[family]) / float(total) * 100.0)])
+	parts.sort()
+	return " ".join(parts)
+
+
+func _prop_kind_matches_palette(kind: String, counts: Dictionary) -> bool:
+	var total := 0
+	for family in counts:
+		total += int(counts[family])
+	if total == 0:
+		return false
+	var share := func(family: String) -> float:
+		return float(counts.get(family, 0)) / float(total)
+	match kind:
+		"tree":
+			return share.call("green") >= 0.30 and share.call("wood") >= 0.02 \
+				and share.call("pink") <= 0.20
+		"rock":
+			return share.call("stone") >= 0.40 and share.call("pink") <= 0.05
+		"wood":
+			return share.call("wood") >= 0.50 and share.call("pink") <= 0.05 \
+				and share.call("green") <= 0.20
+		_:
+			return true  # deco 就是花花草草:粉的黄的绿的都算对
+
+
+## 一个像素属于哪一族。空字符串 = 透明,不该参与判断。
+func _prop_family(color: Color) -> String:
+	if color.a < 0.12:
+		return ""
+	if color.is_equal_approx(SHADOW_TINT):
+		return "shadow"
+	for family in PROP_PALETTE:
+		for swatch in PROP_PALETTE[family]:
+			if color.is_equal_approx(swatch):
+				return family
+	return "other"
+
+
 ## 池塘:岛内「没有草」的那些格就是塘 —— 玩家不许走进去,而且要正好停在塘边。
-func _test_ponds(map: Node, props: FarmProps, walker: Player, farm: FarmPlot) -> void:
+func _test_ponds(map: Node, walker: Player, farm: FarmPlot) -> void:
 	print("-- ponds")
 	var grass_layer: TileMapLayer = map.get_node("GameTilemap/grass")
 	var cells := grass_layer.get_used_cells()

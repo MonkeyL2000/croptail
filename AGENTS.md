@@ -30,7 +30,7 @@
 | `scripts/farm/` | 农田:`crop_data.gd`、`crop_db.gd`、`farm_cell.gd`(一格)、`farm_plot.gd`(网格+规则)、`target_indicator.gd`(面前那格的指示框) |
 | `scripts/player/` | 玩家本体 + 三个状态(idle/walk/use) |
 | `scripts/state_machine/` | 通用节点状态机(与游戏解耦) |
-| `scripts/world/` | 地图与地面物件:`farm_map.gd`(水墙)、`farm_props.gd`(撒道具/地标/斧镐规则)、`prop_db.gd`(道具表)、`chicken.gd` |
+| `scripts/world/` | 地图与地面物件:`farm_map.gd`(水墙)、`farm_props.gd`(撒道具/地标/斧镐规则)、`prop_db.gd`(道具表,47 条 rect)、`chicken.gd` |
 | `scripts/ui/` | HUD(`hud.gd`)、图标表(`tool_icons.gd` / `item_icon.gd`) |
 | `main.tscn` 的节点顺序 | `FarmMap` → `Player` → `TargetIndicator`(指示框必须在最后 = 画在最上面),HUD 是 `CanvasLayer` 永远在最上 |
 | `scenes/dev/` | 开发工具场景:`selftest`(自检)、`screenshot`(出图)、`map_dump`(ASCII 地图)、`retile`(重算地形图块)、`grass_terrain_ref`(旧地图快照,当 peering 的标准答案) |
@@ -46,14 +46,16 @@
 | 脚本 | 作用 |
 |---|---|
 | `gen_pixel_font.py` | 生成 `game_source/font/sprout_ui.{png,fnt}` + `docs/art/font_preview.png` |
-| `gen_player_scene.py` | 重新生成 `scenes/characters/player.tscn`(24 个动画 + Camera2D) |
+| `gen_player_scene.py` | 重新生成 `scenes/characters/player.tscn`(32 个动画 = idle/walk x 4 朝向 + 6 把工具 x 4 朝向 + Camera2D) |
 | `annotate_sheet.py` | 给图集画格线存到 `docs/art/`,方便人工核对格子含义 |
 | `annotate_actions.py` | 把 `Basic Charakter Actions.png` 的版式(3 个动作组 x 4 个朝向)框出来标好,存 `docs/art/actions_groups.png` |
 | `annotate_terrain.py` | 把 TileSet 的 peering 信息画到图集上(`docs/art/terrain_*.png`):每格右上角一个九宫格,填色 = 那个方向也是同种地面 |
 | `annotate_objects.py` | 把**代码认定的名字**写在斧/镐/围栏/鸡舍的放大图上(`docs/art/tools_objects.png`),核对「哪格是什么」用 |
+| `check_props.py` | **道具表体检**:每条 rect 是不是只围了**一个**精灵(主色家族 ∪ 阴影的包围盒 == rect)、kind 和调色板对不对、有没有两条共用/重叠、图集里的精灵有没有漏登记。退出码 0 = 全过。改 `prop_db.gd` 后**必跑** |
+| `annotate_props.py` | 把 `prop_db.gd` 里每条 rect 描边 + 编号画到两个道具图集上(`docs/art/props_sheet.png`) —— 「素材放错了」的对照图,人工核对用 |
 | `carve_ponds.py` | 按椭圆删草地格、挖出池塘(`--dry-run` 可看效果)。改完**必须**跑 `retile.tscn` + `retile_grass.py` |
 | `render_map.py` | 离线把 `farm_map.tscn` 的地形层合成成一张整图(`docs/art/map.png`)。**看草坪对不对看这张**,不要在游戏里对着一小块猜 |
-| `extract_props.py` | 连通域分析道具图集(只是**建议**,权威表在 `prop_db.gd`) |
+| `extract_props.py` | 连通域分析道具图集(只是**建议**,权威表在 `prop_db.gd`)。⚠️ 它的 rect 会把**挨着摆的两块精灵粘成一块**,只能当参考 —— 见 DECISIONS#prop-art-rects |
 
 生成器是「离线算一遍,结果入库」的路子 —— 不要把它们塞进构建流程。
 
@@ -114,9 +116,19 @@
   (用户报的「指示器的格子和实际作用的格子不是一格」就是这个,见 DECISIONS#cell-sprites)。
 - **改完贴图/精灵的落点,要拿画面量一次**:`scripts/dev/screenshot.gd` 会把农田锄满,
   于是整块农田是个纯色 192x112 方块 —— 它的包围盒必须正好等于 `FarmPlot` 的外框。
+- **道具 rect 必须「一条 = 一个精灵」**:图集里有些精灵是紧挨着的,连通域(flood fill)
+  会把它和邻居糊成一块 —— **不报任何错**,逻辑测试全绿,只是画面上多出一截不属于它的东西
+  (用户看到的「树好像倒下了」就是灌木右边粘了一截树桩)。判据很便宜:rect 里像素按
+  颜色家族分类,**主色家族 ∪ 半透明阴影的包围盒必须正好等于 rect**。
+  改 `prop_db.gd` 后**必跑** `python tools/check_props.py`,要看图用
+  `python tools/annotate_props.py`(`docs/art/props_sheet.png`)。
+  **kind 由颜色家族决定,不由形状**:粉 ⇒ 花 ⇒ `deco`(永远不许 solid)、灰 ⇒ 石、
+  木色 ⇒ `wood`、绿 ⇒ 草/灌木。引擎侧也有回归断言(`selftest.gd::_test_prop_art()`),
+  见 DECISIONS#prop-art-rects。
 - **拿不定「这格素材是什么」时,别接着推**:`tools/annotate_sheet.py` /
-  `annotate_objects.py` / `annotate_terrain.py` 会把格子坐标画到图上,
-  让用户看一眼就能回答。斧/镐的名字就是这么来的(推断值,见 DECISIONS#gather-tools)。
+  `annotate_objects.py` / `annotate_props.py` / `annotate_terrain.py` 会把格子坐标和
+  代码认定的名字画到图上,让用户看一眼就能回答。斧/镐的名字就是这么来的
+  (推断值,见 DECISIONS#gather-tools);不报错但画错的 bug 都靠这个抓。
 - GDScript 缩进必须用 Tab。
 - `GameState`/`TimeManager` 的函数**不要写成 `static`**:它们是 autoload 实例,
   从实例调用 static 函数引擎会报错(踩过,见 DECISIONS)。

@@ -60,8 +60,8 @@ const ICONS := {
 	# 斧 / 镐:materials 图集里两格没人用过的手持工具(见文件头的说明)
 	"axe": {"sheet": MATERIALS_SHEET, "rect": Rect2(16, 0, 16, 16)},
 	"pickaxe": {"sheet": MATERIALS_SHEET, "rect": Rect2(32, 0, 16, 16)},
-	# 砍/挖到的材料。木料用 biome 图集那堆木柴(PropDB 也拿它当道具)
-	"wood": {"sheet": BIOME_SHEET, "rect": Rect2(80, 35, 16, 9)},
+	# 砍/挖到的材料。木料用 biome 图集那堆木柴(PropDB 的 wood_pile 也是它)
+	"wood": {"sheet": BIOME_SHEET, "rect": Rect2(80, 35, 16, 10)},
 	"stone": {"sheet": MATERIALS_SHEET, "rect": Rect2(0, 4, 16, 10)},
 }
 

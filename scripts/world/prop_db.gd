@@ -13,13 +13,24 @@ extends RefCounted
 ## 生成脚本见 `tools/extract_props.py`。想换素材:重跑那个脚本,把输出的
 ## `PROPS` 表贴回来即可 —— 碰撞体也是同一份数据算出来的,不会对不上。
 ##
+## ## 为什么每条 rect 都要「一像素不多」
+##
+## 图集里**有些精灵是紧挨着摆的**(灌木右边挨着一截树桩、麦穗长在叶子上面),
+## 自动涨水会把它们连成一块,于是矩形里塞进了邻居 —— 画到游戏里就是「灌木旁边
+## 莫名其妙戳出来一截木头」。所以现在用 `tools/check_props.py` 体检每一条:
+## 拿**主色类 ∪ 阴影**的包围盒去比,比矩形小就说明矩形里混了别人的东西。
+## 改完表一定要跑一遍,再对 `tools/annotate_props.py` 生成的
+## `docs/art/props_sheet.png` 看一眼(人肉复核用的对照图)。
+##
 ## ## 分类
 ##
 ## 靠**调色板**判断,不是靠形状猜(见 docs/DECISIONS.md#prop-art-classification):
-##   - 绿色占多数 -> 灌木 / 草簇(不挡路)
-##   - 灰白(石色)占多数 -> 石头(挡路)
-##   - 褐色(木色)占多数 -> 木头 / 树枝(挡路)
-## 这张表是「人肉复核过一遍」的结果:自动分类只在调色板明确时可信。
+##   - 绿色占多数 -> 灌木 / 草簇 / 花(花有绿茎,所以粉 + 绿 = 花)
+##   - 灰白(石色)占多数 -> 石头(挡路,镐头能挖)
+##   - 褐色(木色)占多数 -> 木头 / 树桩(挡路,斧头能砍)
+##
+## 注意:**粉色是花,不是石头**。之前的表把 `(82,2)` `(33,33)` `(64,49)` 三朵
+## 大粉花当成了石头(还标了 solid),玩家会撞在花上 —— 现在它们都归 deco。
 
 ## 每一行的格式:名字 -> { sheet: 图集路径 key, rect: Rect2, kind: 种类, solid: 是否挡路 }
 ## rect 是**源图集里的像素矩形**,不是格子。
@@ -31,51 +42,64 @@ const SHEETS := {
 }
 
 const PROPS := {
-	# --- 树(biome 图集里的三棵 + 一棵棕色树干)---------------------------
-	"tree_small": {"sheet": "biome", "rect": Rect2(1, 0, 14, 28), "kind": "tree", "solid": true},
-	"tree_big": {"sheet": "biome", "rect": Rect2(20, 1, 24, 30), "kind": "tree", "solid": true},
-	"tree_big_mirror": {"sheet": "biome", "rect": Rect2(52, 1, 24, 30), "kind": "tree", "solid": true},
-	"tree_autumn": {"sheet": "biome", "rect": Rect2(129, 34, 14, 28), "kind": "tree", "solid": true},
+	# --- 树:斧头能砍,给 2 木材 ------------------------------------------
+	# 图集里只有三棵树;它们都「站着」(矩形高 > 宽)。
+	"tree_small": {"sheet": "biome", "rect": Rect2(1, 0, 14, 29), "kind": "tree", "solid": true},
+	"tree_big": {"sheet": "biome", "rect": Rect2(20, 1, 24, 31), "kind": "tree", "solid": true},
+	# 轮廓和 tree_big 一模一样,但树冠上点了粉花 —— 是**开花的树**,不是镜像贴图
+	"tree_flower": {"sheet": "biome", "rect": Rect2(52, 1, 24, 31), "kind": "tree", "solid": true},
 
-	# --- 石头(materials 图集里的两块灰石 + biome 图集里的石堆)-----------
+	# --- 石头:镐头能挖,给 1 石头 ----------------------------------------
 	"rock_low": {"sheet": "materials", "rect": Rect2(0, 4, 16, 10), "kind": "rock", "solid": true},
 	"rock_round": {"sheet": "materials", "rect": Rect2(1, 18, 14, 13), "kind": "rock", "solid": true},
-	"rock_pile": {"sheet": "biome", "rect": Rect2(33, 33, 13, 14), "kind": "rock", "solid": true},
-	"rock_wide": {"sheet": "biome", "rect": Rect2(64, 49, 16, 14), "kind": "rock", "solid": true},
-	"rock_mossy": {"sheet": "biome", "rect": Rect2(82, 2, 13, 12), "kind": "rock", "solid": true},
+	"rock_mossy": {"sheet": "biome", "rect": Rect2(128, 18, 16, 12), "kind": "rock", "solid": true},
+	"rock_boulder": {"sheet": "biome", "rect": Rect2(80, 67, 16, 12), "kind": "rock", "solid": true},
+	"rock_small": {"sheet": "biome", "rect": Rect2(99, 68, 10, 8), "kind": "rock", "solid": true},
+	"rock_chip": {"sheet": "biome", "rect": Rect2(114, 18, 10, 8), "kind": "rock", "solid": true},
 
-	# --- 木头(materials 图集里的两截木料 + biome 图集里的树枝)----------
+	# --- 木头 / 树桩:斧头能砍,给 1 木材 --------------------------------
 	"wood_log": {"sheet": "materials", "rect": Rect2(17, 17, 13, 14), "kind": "wood", "solid": true},
 	"wood_log_big": {"sheet": "materials", "rect": Rect2(33, 17, 14, 14), "kind": "wood", "solid": true},
-	"wood_branch": {"sheet": "biome", "rect": Rect2(67, 36, 10, 10), "kind": "wood", "solid": true},
-	"wood_branch_small": {"sheet": "biome", "rect": Rect2(52, 36, 8, 10), "kind": "wood", "solid": true},
-	"wood_pile": {"sheet": "biome", "rect": Rect2(80, 35, 16, 9), "kind": "wood", "solid": true},
+	"wood_pile": {"sheet": "biome", "rect": Rect2(80, 35, 16, 10), "kind": "wood", "solid": true},
+	"stump_round": {"sheet": "biome", "rect": Rect2(67, 36, 10, 10), "kind": "wood", "solid": true},
+	"stump_small": {"sheet": "biome", "rect": Rect2(52, 36, 8, 10), "kind": "wood", "solid": true},
+	"stump_log": {"sheet": "biome", "rect": Rect2(60, 68, 8, 9), "kind": "wood", "solid": true},
+	"stump_tiny": {"sheet": "biome", "rect": Rect2(25, 71, 7, 7), "kind": "wood", "solid": true},
 
-	# --- 灌木 / 草丛 / 碎石:不挡路,只让地面不空 -------------------------
-	"bush_wide": {"sheet": "biome", "rect": Rect2(0, 48, 32, 15), "kind": "deco", "solid": false},
-	"bush_wide_alt": {"sheet": "biome", "rect": Rect2(36, 64, 32, 15), "kind": "deco", "solid": false},
-	"bush_low": {"sheet": "biome", "rect": Rect2(2, 68, 30, 11), "kind": "deco", "solid": false},
-	"bush_leafy": {"sheet": "biome", "rect": Rect2(128, 64, 16, 15), "kind": "deco", "solid": false},
-	"bush_round": {"sheet": "biome", "rect": Rect2(80, 67, 16, 12), "kind": "deco", "solid": false},
-	"bush_tall": {"sheet": "biome", "rect": Rect2(129, 18, 14, 11), "kind": "deco", "solid": false},
-	"bush_small": {"sheet": "biome", "rect": Rect2(83, 50, 11, 11), "kind": "deco", "solid": false},
+	# --- 灌木 / 草簇 / 麦子:不挡路,也不给东西 ---------------------------
+	# 前两条的矩形右边被**切掉**过:原来把紧挨着的一截树桩也圈进来了,
+	# 于是灌木右边凭空戳出一段木头(看着就像倒下的树)。那两截树桩现在
+	# 单独成了 stump_log / stump_tiny,归木头那组。
+	"bush_wide": {"sheet": "biome", "rect": Rect2(0, 48, 32, 16), "kind": "deco", "solid": false},
+	"bush_wide_alt": {"sheet": "biome", "rect": Rect2(36, 64, 24, 16), "kind": "deco", "solid": false},
+	"bush_low": {"sheet": "biome", "rect": Rect2(2, 68, 23, 12), "kind": "deco", "solid": false},
+	"bush_leafy": {"sheet": "biome", "rect": Rect2(128, 64, 14, 11), "kind": "deco", "solid": false},
 	"shrub": {"sheet": "biome", "rect": Rect2(112, 68, 13, 9), "kind": "deco", "solid": false},
-	"flower_patch": {"sheet": "biome", "rect": Rect2(100, 4, 10, 10), "kind": "deco", "solid": false},
-	"flower_pair": {"sheet": "biome", "rect": Rect2(115, 18, 8, 7), "kind": "deco", "solid": false},
+	"sprig_b": {"sheet": "biome", "rect": Rect2(137, 74, 7, 5), "kind": "deco", "solid": false},
 	"tuft_a": {"sheet": "biome", "rect": Rect2(97, 18, 8, 5), "kind": "deco", "solid": false},
 	"tuft_b": {"sheet": "biome", "rect": Rect2(84, 23, 8, 5), "kind": "deco", "solid": false},
 	"tuft_c": {"sheet": "biome", "rect": Rect2(102, 25, 8, 5), "kind": "deco", "solid": false},
-	"tuft_d": {"sheet": "biome", "rect": Rect2(99, 39, 9, 5), "kind": "deco", "solid": false},
-	"tuft_e": {"sheet": "biome", "rect": Rect2(99, 54, 9, 5), "kind": "deco", "solid": false},
-	"weed_a": {"sheet": "biome", "rect": Rect2(20, 36, 7, 8), "kind": "deco", "solid": false},
-	"weed_b": {"sheet": "biome", "rect": Rect2(114, 37, 11, 8), "kind": "deco", "solid": false},
-	"weed_c": {"sheet": "biome", "rect": Rect2(114, 52, 11, 8), "kind": "deco", "solid": false},
-	"pebble_a": {"sheet": "biome", "rect": Rect2(4, 39, 7, 5), "kind": "deco", "solid": false},
-	"pebble_b": {"sheet": "biome", "rect": Rect2(115, 3, 7, 7), "kind": "deco", "solid": false},
-	"pebble_c": {"sheet": "biome", "rect": Rect2(136, 3, 7, 7), "kind": "deco", "solid": false},
-	"pebble_d": {"sheet": "biome", "rect": Rect2(129, 7, 7, 7), "kind": "deco", "solid": false},
-	"pebble_e": {"sheet": "biome", "rect": Rect2(53, 54, 6, 6), "kind": "deco", "solid": false},
-	"pebble_f": {"sheet": "biome", "rect": Rect2(38, 56, 4, 4), "kind": "deco", "solid": false},
+	# 麦穗:一根高秆 + 顶上一颗金色的穗,底下是细叶(以前被当成「秋天的树」
+	# 塞进了 tree 那组,还带 solid —— 玩家会撞在一株麦子上)
+	"wheat_plant": {"sheet": "biome", "rect": Rect2(129, 34, 14, 29), "kind": "deco", "solid": false},
+
+	# --- 花:全是粉色/黄色,不挡路 ---------------------------------------
+	"flower_big": {"sheet": "biome", "rect": Rect2(33, 33, 13, 14), "kind": "deco", "solid": false},
+	"flower_rose": {"sheet": "biome", "rect": Rect2(64, 49, 16, 14), "kind": "deco", "solid": false},
+	"flower_pink": {"sheet": "biome", "rect": Rect2(82, 2, 13, 13), "kind": "deco", "solid": false},
+	"flower_patch": {"sheet": "biome", "rect": Rect2(100, 4, 10, 11), "kind": "deco", "solid": false},
+	"flower_green": {"sheet": "biome", "rect": Rect2(83, 50, 11, 12), "kind": "deco", "solid": false},
+	"flower_pink_b": {"sheet": "biome", "rect": Rect2(114, 52, 11, 9), "kind": "deco", "solid": false},
+	"flower_pink_c": {"sheet": "biome", "rect": Rect2(99, 54, 9, 6), "kind": "deco", "solid": false},
+	"flower_pink_d": {"sheet": "biome", "rect": Rect2(20, 36, 7, 8), "kind": "deco", "solid": false},
+	"flower_yellow": {"sheet": "biome", "rect": Rect2(114, 37, 11, 9), "kind": "deco", "solid": false},
+	"flower_yellow_b": {"sheet": "biome", "rect": Rect2(99, 39, 9, 6), "kind": "deco", "solid": false},
+	"flower_small_a": {"sheet": "biome", "rect": Rect2(115, 3, 7, 8), "kind": "deco", "solid": false},
+	"flower_small_b": {"sheet": "biome", "rect": Rect2(136, 3, 7, 8), "kind": "deco", "solid": false},
+	"flower_small_c": {"sheet": "biome", "rect": Rect2(129, 7, 7, 8), "kind": "deco", "solid": false},
+	"flower_tiny_a": {"sheet": "biome", "rect": Rect2(4, 39, 7, 5), "kind": "deco", "solid": false},
+	"flower_tiny_b": {"sheet": "biome", "rect": Rect2(53, 54, 6, 6), "kind": "deco", "solid": false},
+	"flower_bud": {"sheet": "biome", "rect": Rect2(38, 56, 4, 4), "kind": "deco", "solid": false},
 
 	# --- 围栏(Tilesets/Fences.png 是 4x4 个 16x16 格)------------------
 	#

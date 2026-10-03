@@ -66,7 +66,8 @@ or open `project.godot` in the editor and hit F5.
 | `scripts/world/` | map collision (`farm_map.gd`), ground props + landmarks + gather rules (`farm_props.gd`, `prop_db.gd`), chickens (`chicken.gd`) |
 | `scripts/ui/` | HUD and the icon atlases (`hud.gd`, `tool_icons.gd`, `item_icon.gd`) |
 | `docs/` | `PROGRESS.md` (where it is) and `DECISIONS.md` (why) |
-| `docs/art/` | generated reference images (map render, sheet grids, action layout) |
+| `docs/art/` | generated reference images (map render, sheet grids, action layout, labelled prop sheet) |
+| `tools/` | offline generators / checkers (`check_props.py`, `annotate_*.py`, `render_map.py`, ...) |
 
 ## Self-check
 
@@ -77,10 +78,19 @@ hand — it drives the real scenes and prints a summary:
 godot --path . res://scenes/dev/selftest.tscn
 ```
 
-It ends with `=== SELFTEST END: N checks, 0 failed ===` (223 checks at the time
-of writing) and covers soil rules, the growth cycle, sprite atlas coordinates,
-state transitions, movement, main-scene wiring, the water collision walls, the
-fence pen / chickens, axe & pickaxe rules, and the ponds.
+It ends with `=== SELFTEST END: N checks, 0 failed ===` (231 checks at the time
+of writing) and covers soil rules, the growth cycle, sprite atlas coordinates
+(incl. "a prop rect must hold exactly one sprite"), state transitions, movement,
+main-scene wiring, the water collision walls, the fence pen / chickens, axe &
+pickaxe rules, and the ponds.
+
+The prop table (`scripts/world/prop_db.gd`) also has an offline checker, because
+a rect that accidentally swallows a neighbouring sprite raises no error at all:
+
+```bash
+python tools/check_props.py        # 0 problems / 0 warnings expected
+python tools/annotate_props.py     # -> docs/art/props_sheet.png (human review)
+```
 
 ## Credits
 
