@@ -191,6 +191,11 @@
 
 ## Next(按顺序做)
 
+0. **(等用户回话)确认素材名字**:`docs/art/props_sheet.png`(道具 47 条)、
+   `docs/art/tools_objects.png`(斧/镐)、`docs/art/plants_sheet.png`(作物)、
+   `docs/art/tools_sheet.png`(工具图标)—— 名字都是像素推断的。
+   用户说「反了/不是那个」就改 `scripts/world/prop_db.gd`(名字)或 `tool_icons.gd`(rect),
+   改完跑 `python tools/check_props.py` + 自检;名字不影响玩法,kind 已有回归钉住。
 1. **把 HUD 的「提示」用完**:斧/镐已经会发提示了(「Chopped a tree (+2 wood).」等),
    农田那四个工具的失败分支还是静默的。在 `farm_cell.gd` (已锄/已种/水够多)
    和 `player.gd` (手里没种子/没金币)的失败分支上 `GameState` 发消息。
