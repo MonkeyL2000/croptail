@@ -27,10 +27,11 @@
 |---|---|
 | `scenes/` | 场景。`main.tscn`=主场景,`world/`=地图,`characters/`, `ui/`, `dev/`(自检场景) |
 | `scripts/core/` | 全局:`game_state.gd`、`time_manager.gd`、`main.gd`、`game_input_events.gd` |
-| `scripts/farm/` | 农田:`crop_data.gd`、`crop_db.gd`、`farm_cell.gd`(一格)、`farm_plot.gd`(网格+规则) |
+| `scripts/farm/` | 农田:`crop_data.gd`、`crop_db.gd`、`farm_cell.gd`(一格)、`farm_plot.gd`(网格+规则)、`target_indicator.gd`(面前那格的指示框) |
 | `scripts/player/` | 玩家本体 + 三个状态(idle/walk/use) |
 | `scripts/state_machine/` | 通用节点状态机(与游戏解耦) |
 | `scripts/world/`, `scripts/ui/` | 地图生成、HUD |
+| `main.tscn` 的节点顺序 | `FarmMap` → `Player` → `TargetIndicator`(指示框必须在最后 = 画在最上面),HUD 是 `CanvasLayer` 永远在最上 |
 | `scenes/dev/` | 开发工具场景:`selftest`(自检)、`screenshot`(出图)、`map_dump`(ASCII 地图)、`retile`(重算地形图块)、`grass_terrain_ref`(旧地图快照,当 peering 的标准答案) |
 | `scripts/dev/` | 上面那些工具的实现。都是 dev-only,不影响主场景 |
 | `game_source/` | 原版素材,勿改名(名字里有空格,勿动);`game_source/font/` 是生成的 HUD 点阵字体 |
@@ -89,6 +90,15 @@
   玩家一步不动 —— 那才是「偶发失败」的真正来源)。验碰撞就自己给 `velocity` +
   `move_and_slide()`;验输入就等条件(等到真的动了)并设上限,别写死等 N 帧。
   见 DECISIONS#synthetic-input。
+- **目标格只准用 `Player.target_cell()` 算**,它 = 「脚下碰撞圆那格 + 朝向一格」。
+  别写 `world_to_cell(global_position + facing * 16)`:玩家的 `global_position` 是
+  **身体中心**,比脚高 6px,拿它当锤点上下朝向会差**一整格**(用户报的「锄地有点歪」
+  就是这个)。地上那个指示框和工具走的是同一个 `target_cell()`,别另开一套。
+  见 DECISIONS#targeting / #target-indicator。
+- **要验证画面里某个东西画在哪,别猜相机位置** —— 相机节点自己在 `(0,-6)`,
+  而且会被地图边界夹。用 `get_viewport().get_canvas_transform()`(渲染用的同一套
+  变换)把世界坐标换到屏幕坐标。截图工具已经会把 `canvas xform` 和指示框状态打出来,
+  见 DECISIONS#canvas-transform。
 - **改 `scenes/`/`scripts/` 的排版或字体后,看画面用**
   `run_project {scene: "res://scenes/dev/screenshot.tscn"}`(存到 `res://screenshots/`);
   看整张地形对不对用 `python tools/render_map.py docs/art/map.png`;

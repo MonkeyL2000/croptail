@@ -27,6 +27,7 @@ func _ready() -> void:
 	_test_soil_rules()
 	_test_growth_cycle()
 	_test_sprites()
+	_test_targeting()
 	_test_state_machine()
 	_test_tool_art()
 	await _test_movement()
@@ -143,6 +144,63 @@ func _test_sprites() -> void:
 	check("soil sprite is (16,16)", (soil_sprite.texture as AtlasTexture).region == Rect2(16, 16, 16, 16))
 
 
+## 目标格:必须 = **脚下**那格 + 朝向偏移。
+##
+## 用户反馈「不知道会锄哪块地,而且锄的地有点歪,不是正前方那块」。
+## 玩家是自由走位的(没做格对齐),而且「脚」和身体中心差 6px
+## (player.tscn 里 CollisionShape2D 在 (0,6))。老写法拿**身体中心**当锤点:
+## `world_to_cell(position + facing * 16)` —— 上下朝向会差**一整格**,
+## 而且目标格会随「站在格里的哪个位置」跳。这里把它钉死。
+func _test_targeting() -> void:
+	print("-- tool targeting")
+	var home := plot.cell_center(Vector2i(4, 3))
+	var expected := {
+		Vector2.UP: Vector2i(4, 2),
+		Vector2.DOWN: Vector2i(4, 4),
+		Vector2.LEFT: Vector2i(3, 3),
+		Vector2.RIGHT: Vector2i(5, 3),
+	}
+	for facing: Vector2 in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
+		player.global_position = home
+		player.set_facing(facing)
+		check("target = the cell you stand in + one step (%s)" % _facing_name(facing),
+			player.standing_cell() == Vector2i(4, 3) and player.target_cell() == expected[facing])
+
+	# 在格子里挪来挪去(±5px)不能换格 —— 「歪」的另一半原因
+	var seen := {}
+	for offset: Vector2 in [Vector2(-5, -1), Vector2(5, 1), Vector2(2, -1), Vector2(-2, 1)]:
+		player.global_position = home + offset
+		player.set_facing(Vector2.RIGHT)
+		seen[player.target_cell()] = true
+	check("small steps inside the cell keep the same target", seen.size() == 1)
+	check("...and it is still the right neighbour", seen.has(Vector2i(5, 3)))
+
+	# 回归:身体中心在格子边界上方 2px、脚已经在下一格时,面朝下必须锄**脚下那格的下方**。
+	# 老写法在这里得到的是 (4,4) —— 正好是玩家站着的那格(这就是「锄歪了」)。
+	player.global_position = Vector2(home.x, 62.0)
+	player.set_facing(Vector2.DOWN)
+	check("the cell you stand in is the one under your feet",
+		player.standing_cell() == Vector2i(4, 4))
+	check("facing down from there targets the next row, not your own",
+		player.target_cell() == Vector2i(4, 5))
+
+	# 站在农田下沿外面往上锄:得够得到最下面那排,不然贴边一排种不了
+	player.global_position = Vector2(home.x, 120.0)
+	player.set_facing(Vector2.UP)
+	check("you can till the bottom row from outside the plot",
+		player.target_cell() == Vector2i(4, 6) and plot.has_cell(player.target_cell()))
+
+
+func _facing_name(facing: Vector2) -> String:
+	if facing == Vector2.UP:
+		return "up"
+	if facing == Vector2.DOWN:
+		return "down"
+	if facing == Vector2.LEFT:
+		return "left"
+	return "right"
+
+
 func _test_state_machine() -> void:
 	print("-- state machine")
 	var machine: NodeFiniteStateMachine = player.get_node("StateMachine")
@@ -185,6 +243,64 @@ func _test_movement() -> void:
 	check("back to idle when released",
 		(player.get_node("StateMachine") as NodeFiniteStateMachine).current_state_name == "idle")
 	check("velocity zeroed in idle", player.velocity == Vector2.ZERO)
+
+
+## 指示框有没有真的画出像素。
+##
+## 只比「框内 vs 框外」不够 —— 旁边那格地面本来就可能是别的颜色(草 vs 泥土)。
+## 所以读同一格两次:一次框开着、一次把框藏起来,亮度必须有差别。
+## 这样测的只是「框产生了像素」,与底下是什么地形无关。
+func _check_indicator_ink(indicator: Node2D, walker: Player, farm: FarmPlot) -> void:
+	if indicator == null:
+		check("the indicator draws pixels (skipped: no indicator)", true)
+		return
+	# 站在最下面那排的**正下方一格**、面朝上:目标 = 最下面那排,
+	# 且落在画面中间,不会被上下两条 HUD 栏盖住。
+	var cell := Vector2i(4, 6)
+	walker.global_position = farm.cell_center(cell) + Vector2(0, FarmPlot.CELL_SIZE)
+	walker.set_facing(Vector2.UP)
+	# 自检场景里自己那个玩家也带着相机,不抢当前活动相机的话读到的画面是另一个视角
+	walker.camera.make_current()
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	check("the indicator targets the bottom row while standing below it",
+		indicator.call("target_cell") == cell)
+
+	# 角色精灵是 48px、比一格(16px)还大,站着时会把面前那格盖掉 ——
+	# 量像素之前先把它藏起来,不然测的是「角色的腿有没有变化」。
+	var walker_was_visible := walker.visible
+	walker.visible = false
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var lit := _indicator_luma(farm, cell)
+	indicator.visible = false
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var dark := _indicator_luma(farm, cell)
+	indicator.visible = true
+	walker.visible = walker_was_visible
+	print("      indicator ink: luma %.3f with the box, %.3f without" % [lit, dark])
+	check("the indicator samples landed on screen", lit >= 0.0 and dark >= 0.0)
+	check("the indicator really draws pixels", lit - dark > 0.01)
+
+
+## 取农田某格 25 个采样点(含边框线)的平均亮度。
+## 世界 -> 屏幕用视口自己的 canvas_transform —— 和渲染用的同一套变换,
+## 所以不用假设相机 zoom / 位置 / 边界夹紧。返回 -1 表示采样点全在画面外。
+func _indicator_luma(farm: FarmPlot, cell: Vector2i) -> float:
+	var image := get_viewport().get_texture().get_image()
+	var corner := get_viewport().get_canvas_transform() * farm.to_global(Vector2(cell) * FarmPlot.CELL_SIZE)
+	var total := 0.0
+	var samples := 0
+	for offset: int in [1, 4, 8, 11, 14]:
+		for other: int in [1, 4, 8, 11, 14]:
+			var px := floori(corner.x) + offset
+			var py := floori(corner.y) + other
+			if px < 0 or py < 0 or px >= image.get_width() or py >= image.get_height():
+				continue
+			total += image.get_pixel(px, py).get_luminance()
+			samples += 1
+	return total / float(samples) if samples > 0 else -1.0
 
 
 func _props_avoid_plot(props: FarmProps, farm: FarmPlot) -> bool:
@@ -465,9 +581,33 @@ func _test_main_scene() -> void:
 	main_player.set_facing(Vector2.UP)
 	check("target cell inside the plot", main_plot.has_cell(main_player.target_cell()))
 	check("target cell is (0,0)", main_player.target_cell() == Vector2i(0, 0))
+
+	# 指示框必须圈着**工具真正会作用的那格**。框和动作都走 Player.target_cell(),
+	# 所以这里先读框、再真锄一次,比对锄过的那格 —— 框画错地方这条就挂。
+	var indicator := main.get_node_or_null("TargetIndicator") as Node2D
+	check("the main scene has a target indicator", indicator != null)
+	if indicator != null:
+		check("the indicator is wired to the player and the plot",
+			indicator.get("player") == main_player and indicator.get("plot") == main_plot)
+		# 必须画在所有东西**上面**(包括角色)。角色精灵 48px、比一格大得多,
+		# 画在地面层时面朝上会把框整格挡住 —— 这是从真实截图的像素里量出来的,
+		# 不是预估的。用 z_index = -1 也不行:负 z 会被父节点的 z 抵消下场。
+		check("the indicator draws on top of the map and the player",
+			indicator.get_index() > main.get_node("FarmMap").get_index()
+			and indicator.get_index() > main_player.get_index())
+		await RenderingServer.frame_post_draw
+		check("the indicator follows the faced cell",
+			indicator.call("target_cell") == Vector2i(0, 0))
+
 	GameState.select_tool(GameState.Tool.HOE)
 	main_player.use_current_tool()
 	check("hoe tills the faced cell in the real scene", main_plot.get_cell(Vector2i(0, 0)).is_tilled())
+	if indicator != null:
+		check("the indicator pointed at the cell that got tilled",
+			indicator.call("target_cell") == Vector2i(0, 0))
+
+	# 「真的画出来了吗」只在逻辑层查不出来 —— 真读一帧画面量像素。
+	await _check_indicator_ink(indicator, main_player, main_plot)
 
 	# 走到草岛的左边往水里推,应该被正好在岸边的水墙挡住。
 	#

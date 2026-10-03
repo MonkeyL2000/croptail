@@ -15,6 +15,9 @@ extends Node2D
 @export var frames_between: int = 40
 ## 截图前把玩家搬到哪里;空数组 = 不动,用主场景里的出生点
 @export var spots: Array[Vector2] = []
+## 每个位置朝哪边(和 spots 一一对应,不够长就沿用上一个)。
+## 朝向决定「面前那一格」的指示框画在哪 —— 截图想拍指示框就必须能指定朝向。
+@export var facings: Array[Vector2] = []
 
 
 func _ready() -> void:
@@ -29,10 +32,24 @@ func _ready() -> void:
 		if i < spots.size():
 			player.global_position = spots[i]
 			player.camera.reset_smoothing()
+		if i < facings.size():
+			player.set_facing(facings[i])
 		for j in frames_between:
 			await get_tree().process_frame
+		# 等画面稳下来再读:指示框在自己的 _process 里更新,刚传完坐标时读到的还是上一帧
+		_dump_indicator(main, player, i)
 		await _shoot("shot_%d" % (i + 1))
 	print("[screenshot] done -> res://screenshots/")
+
+
+## 指示框的状态:截图里看不见它的时候,靠这行判断是「没画」还是「画到画面外了」
+func _dump_indicator(main: Node, player: Player, spot: int) -> void:
+	var box: Node2D = main.get_node("TargetIndicator")
+	var cell: Vector2i = box.call("target_cell")
+	var plot: FarmPlot = main.get_node("FarmMap/FarmPlot")
+	print("[indicator] spot %d player=%s facing=%s cell=%s in_plot=%s visible=%s in_tree=%s processing=%s" % [
+		spot, player.global_position, player.facing, cell, plot.has_cell(cell),
+		box.visible, box.is_visible_in_tree(), box.is_processing()])
 
 
 ## 把 HUD 各控件的实际矩形和字体度量打出来。
@@ -62,6 +79,8 @@ func _shoot(shot_name: String) -> void:
 	# 等一帧再取,否则拿到的是本帧还没画完的纹理
 	await RenderingServer.frame_post_draw
 	var image := get_viewport().get_texture().get_image()
+	print("[screenshot] canvas xform %s  viewport %s" % [
+		get_viewport().get_canvas_transform(), get_viewport().get_visible_rect().size])
 	var path := "res://screenshots/%s.png" % shot_name
 	var error := image.save_png(path)
 	print("[screenshot] %s -> %s (err %d)" % [shot_name, path, error])

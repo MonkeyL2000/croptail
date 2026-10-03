@@ -9,6 +9,10 @@ extends Node2D
 @onready var farm_props: FarmProps = $FarmMap/Props
 @onready var farm_map: Node2D = $FarmMap
 @onready var player: Player = $Player
+## 面前那一格的指示框。它在 main.tscn 里摆在 FarmMap / Player **之后**,
+## 也就是盖在最上层 —— 角色精灵 48px 比一格还大,画在地面层时面朝上会把框整个挡住
+## (拿真实截图的像素量出来的)。不用 z_index:负 z 会被父节点的 z 抵消下场,连底板都盖不住。
+@onready var target_indicator := $TargetIndicator
 @onready var hud := $HUD
 
 
@@ -20,6 +24,7 @@ func _ready() -> void:
 
 	player.farm_plot = farm_plot
 	player.action_message.connect(hud.show_message)
+	target_indicator.setup(player, farm_plot)
 	TimeManager.day_changed.connect(_on_day_changed)
 	_apply_camera_limits()
 	hud.show_message("Hoe (1) then Seeds (3) then Water (2) - crops only grow on watered days")

@@ -25,6 +25,7 @@
 | TileSet | `res://tilesets/test_tilemap.tres`(旧名沿用;水墙碰撞由 `farm_map.gd` 运行时生成) |
 | 玩家 | `res://scenes/characters/player.tscn`(24 个动画 + Camera2D;由 `tools/gen_player_scene.py` 生成) |
 | HUD | `res://scenes/ui/hud.tscn` + `scripts/ui/hud.gd`(字体由 `tools/gen_pixel_font.py` 生成) |
+| 目标格指示框 | `scripts/farm/target_indicator.gd`(挂在 `main.tscn` 的 `TargetIndicator`,画在**所有东西之上**) |
 | 导出 preset | **无**(还没建) |
 
 ## 操作
@@ -32,7 +33,7 @@
 | 键 | 作用 |
 |---|---|
 | WASD / 方向键 | 四方向移动(相机跟随) |
-| Space | 用当前工具作用在**面前那一格**(先按方向键定朝向) |
+| Space | 用当前工具作用在**面前那一格** —— 那一格地上有指示框(先按方向键定朝向) |
 | 1 / 2 / 3 / 4 | 锄头 / 水壶 / 种子 / 收获 |
 | Q / E | 上/下一个工具 |
 | R | 换作物(小麦 ⇄ 叶菜) |
@@ -100,6 +101,25 @@
     (旧的松断言**恰好能让隐形墙通过**,这就是它当初漏掉的原因)。
 - [x] **2026-10-03 项目记忆 + 仓库**:`AGENTS.md` / `docs/` / `ASSET_CREDITS.md` / `README.md`;
       推到 GitHub:**https://github.com/MonkeyL2000/croptail**(public)
+- [x] **2026-10-03 目标格指示框 + 修「锄地有点歪,不是正前方那块」** —— 用户指出后做的
+  - **「歪」的根因**:`global_position` 是**身体中心**,脚下碰撞圆却在 `(0,6)`,差 6px。
+    老写法 `world_to_cell(global_position + facing * 16)` 拿身体中心当锚点 →
+    上下朝向差**一整格**,而且在格子里挪几像素目标格就跳。
+    现在 `target_cell() = standing_cell() + facing_cell_offset()`,锚点是脚下那个圆
+    (偏移从 `CollisionShape2D.position` 读,不写死)。见 `DECISIONS.md#targeting`。
+  - **指示框**:`scripts/farm/target_indicator.gd`,把「工具会作用到哪一格」画在地上。
+    农田内 = 奶油色框线 + 16% 白填充;农田外 = 暗灰框线、不填充(提示按了没用)。
+  - **它和工具是同一个坐标来源**:都调 `Player.target_cell()`。自检先读框的格子、
+    再真锄一次,比对锄过的是不是同一格。
+  - **画在最上层(含角色之上)**:一开始画在地面层,从**真实截图的像素**量出来不行 ——
+    角色精灵 48x48 比一格(16px)大得多,面朝上时面前整格都被角色盖住,框线一条看不见。
+    (也没用 `z_index = -1`:负 z 会被父节点的 z 抵消下场,连底板都盖不住。)
+  - **自检 137 → 154 项**:新增 `-- tool targeting`(9 条,含「身体中心压在格子边界上、
+    面朝下必须锄脚下那格的下方」这条回归)和指示框 6 条(含真读一帧画面量墨迹:
+    框开着 luma 0.821 / 藏起来 0.786,证明真的产生了像素)。
+  - **截图逐像素复核**:农田内 `(0,1)`/`(4,6)` 都是完整 16x16 方框(奶油线+白填充),
+    农田外 `(15,15)` 只有暗灰框线、无填充。截图工具现在会打印 `canvas xform` 和
+    指示框状态,见 `DECISIONS.md#canvas-transform`。
 
 ## Next(按顺序做)
 
@@ -138,7 +158,10 @@
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
-  → **`=== SELFTEST END: 137 checks, 0 failed ===`**,连跑 4 次都 0 failed,ERROR 区为空。关键几条:
+  → **`=== SELFTEST END: 154 checks, 0 failed ===`**,连跑 3 次都 0 failed,ERROR 区为空。关键几条:
+  - `facing down from there targets the next row, not your own` —— 「锄地有点歪」的回归
+  - `the indicator pointed at the cell that got tilled` —— 框 == 工具作用的那格
+  - `the indicator really draws pixels`(luma 0.821 有框 / 0.786 无框)
   - `each direction of a tool uses its own atlas row` —— 「朝两边挥」那个 bug 的回归
   - `left frames are the exact mirror of the right frames (8 frames)`
   - `front action frames show the face, back frames do not`
@@ -151,7 +174,8 @@
   `python tools/annotate_terrain.py` → `docs/art/terrain_grass.png`(peering 九宫格对照)
 - `run_project {scene: "res://scenes/dev/screenshot.tscn"}` → `screenshots/shot_1..3.png`,
   逐像素复核:四个工具图标精确(0 误差)命中各自的素材格
-  `Tools(0,2) / Tools(0,0) / Tools(0,4) / Plants(4,0)`
+  `Tools(0,2) / Tools(0,0) / Tools(0,4) / Plants(4,0)`;
+  指示框 = 16x16 方框套住目标格(农田内亮框+填充 / 农田外暗框,见上)
 - 主场景 `run_project {projectPath: "D:\\godot_projects\\croptail"}`:仅
   `[farm_props] ~390 props ... 19xx collision boxes` + `[farm_map] water walls: 76 collision shapes`,无 ERROR
 - 日期:2026-10-03
