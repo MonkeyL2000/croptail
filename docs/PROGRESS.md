@@ -15,9 +15,11 @@
 | 主场景 | `res://scenes/main.tscn` |
 | 自检场景 | `res://scenes/dev/selftest.tscn`(**逻辑改动的验收口**) |
 | 截图工具 | `res://scenes/dev/screenshot.tscn` → `res://screenshots/shot_*.png` |
+| 地形整图 | `python tools/render_map.py docs/art/map.png`(离线合成,看草坪对不对看这张) |
+| 地形图块重算 | `res://scenes/dev/retile.tscn`(改了地图形状后要跑;先自校验参考图) |
 | 地图速览 | `res://scenes/dev/map_dump.tscn`(打 ASCII 地图) |
 | autoload | `GameState`=`res://scripts/core/game_state.gd`,`TimeManager`=`res://scripts/core/time_manager.gd` |
-| 地图 | `res://scenes/world/farm_map.tscn`(1938 格草 + 3312 格水,72x46 格) |
+| 地图 | `res://scenes/world/farm_map.tscn`(1938 格草 + 3312 格水,72x46 格)。改完形状要重跑 `res://scenes/dev/retile.tscn`,否则新格子的图块是错的 |
 | 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~390 个,碰撞从贴图 alpha 现算 |
 | TileSet | `res://tilesets/test_tilemap.tres`(旧名沿用;水墙碰撞由 `farm_map.gd` 运行时生成) |
 | 玩家 | `res://scenes/characters/player.tscn`(24 个动画 + Camera2D;由 `tools/gen_player_scene.py` 生成) |
@@ -68,6 +70,23 @@
 - [x] **2026-10-03 自检场景扩到 128 项断言**,新增覆盖:道具撒点/可达性、树真的挡住人、
       每个 `use_*` 帧矩形在贴图内、四个工具图标逐像素不同、
       HUD 字体/字号/行高、以及**读一帧真实画面**量 DayLabel 墨迹有没有被裁
+- [x] **2026-10-03 修复「草坪全是错的」** —— 用户指出后查出来的
+  - **根因**:地图形状是脚本刷的,刷的时候**每一格都写了同一个 atlas 坐标**(左上角块)。
+    而「该画哪一块」由 TileSet 的 terrain(peering)决定:内部用 `(1,1)`,四条边各一块,
+    四个角各一块,还有四种内凹块 —— 一共 32 块。刷错的那一下不报错,只是画面不对。
+  - **修法**:`scripts/dev/retile.gd` 调引擎自己的 `set_cells_terrain_connect()` 重算,
+    把 `tile_map_data` 写出来,再用 `tools/retile_grass.py` 贴回 .tscn。
+    新表 = 1760 内部块 + 边 +**正好 4 个角块**(矩形岛就该是这样)。
+  - **方法怎么验证的**:拿旧地图(263 格)当标准答案 —— 那是原作者用地形笔刷点的,
+    重算结果和存着的**逐格一致(0 处不同)**。快照留在 `scenes/dev/grass_terrain_ref.tscn`,
+    工具每次跑都先校验它。
+  - **顺带修了一个水墙的坐标系 bug**:`water` 层在 (0,0)、`grass` 层在 (-8,-5),
+    两层格坐标差半格,「水格减草格」算出来的墙整体横移一格 —— 左边一堵隐形墙
+    (走不到岸边),右边一条能走到水上的缝。现在改成按**草地层的岛轮廓**生成,
+    玩家停在「草沿 + 半径」± 1px 内(实测 草左沿 -264 / 玩家 -259,半径 5)。
+  - **新增回归断言**:拿同一个 TileSet 开临时层跑一遍引擎的 peering 再逐格对比;
+    内部格必须是 `(1,1)`;岸边真走一遍并量停下的坐标
+    (旧的松断言**恰好能让隐形墙通过**,这就是它当初漏掉的原因)。
 - [x] **2026-10-03 项目记忆 + 仓库**:`AGENTS.md` / `docs/` / `ASSET_CREDITS.md` / `README.md`;
       推到 GitHub:**https://github.com/MonkeyL2000/croptail**(public)
 
@@ -103,14 +122,19 @@
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
-  → **`=== SELFTEST END: 128 checks, 0 failed ===`**,ERROR 区为空
-  (`docs/DECISIONS.md#bitmap-font-yoffset` 的探针会打印
-  `'D' 墨迹在 Label 内的行 3..11`,以及 `DayLabel rect y 4..19, ink rows 7..18`)
+  → **`=== SELFTEST END: 134 checks, 0 failed ===`**,ERROR 区为空。关键几条:
+  - `grass tiles match the TileSet's own terrain peering`(拿引擎当标准答案逐格比)
+  - `a fully surrounded cell uses the interior tile`(`(1,1)`)
+  - `water wall is flush with the shore (within 1px)`(岸边实测 草沿 -264,玩家 -259)
+  - 字体探针 `'D' 墨迹在 Label 内的行 3..11`、`DayLabel rect y 4..19, ink rows 7..18`
+- `scripts/dev/retile.gd` → **`REFERENCE CHECK: PASS`**(263 格标准答案 0 差异)
+- `python tools/render_map.py docs/art/map.png` → 1152x736 整张地形图;
+  `python tools/annotate_terrain.py` → `docs/art/terrain_grass.png`(peering 九宫格对照)
 - `run_project {scene: "res://scenes/dev/screenshot.tscn"}` → `screenshots/shot_1..3.png`,
   逐像素复核:四个工具图标精确(0 误差)命中各自的素材格
   `Tools(0,2) / Tools(0,0) / Tools(0,4) / Plants(4,0)`
 - 主场景 `run_project {projectPath: "D:\\godot_projects\\croptail"}`:仅
-  `[farm_props] ~390 props ... 19xx collision boxes` + `[farm_map] water walls: 80 collision shapes`,无 ERROR
+  `[farm_props] ~390 props ... 19xx collision boxes` + `[farm_map] water walls: 76 collision shapes`,无 ERROR
 - 日期:2026-10-03
 
 ## 待补的记录

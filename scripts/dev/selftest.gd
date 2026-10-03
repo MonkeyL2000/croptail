@@ -316,6 +316,7 @@ func _test_main_scene() -> void:
 	var main_props := main.get_node("FarmMap/Props") as FarmProps
 	check("main.gd injected the farm plot", main_player.farm_plot == main_plot)
 	check("map built water walls", map.get_node("WaterWalls").get_child_count() > 0)
+	_test_grass_terrain(map)
 	check("HUD is present", main.get_node("HUD") != null)
 	await _measure_font_baseline()
 	await _check_hud_layout(main.get_node("HUD"))
@@ -349,42 +350,56 @@ func _test_main_scene() -> void:
 	main_player.use_current_tool()
 	check("hoe tills the faced cell in the real scene", main_plot.get_cell(Vector2i(0, 0)).is_tilled())
 
-	# 走到草岛的左边往水里推,应该被自动生成的水墙挡住。
+	# 走到草岛的左边往水里推,应该被正好在岸边的水墙挡住。
 	#
-	# **出发格不能写死坐标**:道具是按格子随机撒的,写死的点随时可能落在某棵树
-	# 里,玩家会被卡住而测试随机变红(踩过)。改成问布局要一格:
-	# 在某一行的可达格子里,找最靠左、且左边连着 4 格都空的格子 ——
-	# 左边有 4 格空才能保证「确实往左走了」这条断言成立。
-	var shore_row := 15
-	var row_cells: Array[Vector2i] = []
-	for cell in walkable:
-		if cell.y == shore_row:
-			row_cells.append(cell)
-	row_cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return a.x < b.x)
-	check("there is a walkable row to test the shore on", row_cells.size() > 8)
+	# **出发格不能写死坐标,也不能只看「左边连着几格是空地」**:道具是按格子随机
+	# 撒的,写死的点随时可能落进某棵树里;而只看「连着几格空」也不够 ——
+	# 那几格尽头可能是棵树,量到的就成了树的位置,不是墙的位置(两种都踩过)。
+	#
+	# 所以要找这样的**一行**:从岛的最左一格开始往右,连着好几格都空而且走得到。
+	# 这样玩家一路往左,左边除了水墙再没有别的东西挡他。
+	var grass_layer: TileMapLayer = map.get_node("GameTilemap/grass")
+	var leftmost_of_row := {}
+	for cell in grass_layer.get_used_cells():
+		leftmost_of_row[cell.y] = mini(int(leftmost_of_row.get(cell.y, 1 << 30)), cell.x)
 
 	var start_cell := Vector2i(-999, -999)
-	for index in range(4, row_cells.size()):
-		var consecutive := true
-		for back in range(1, 4):
-			if row_cells[index].x - row_cells[index - back].x != back:
-				consecutive = false
-		if consecutive:
-			start_cell = row_cells[index]
+	for y in leftmost_of_row:
+		var run := 0
+		while walkable.has(Vector2i(int(leftmost_of_row[y]) + run, int(y))):
+			run += 1
+		if run >= 5:
+			start_cell = Vector2i(int(leftmost_of_row[y]) + 2, int(y))
 			break
-	check("found a spot with open grass to the left", start_cell.x != -999)
+	check("found a shore run with no props blocking it", start_cell.x != -999)
 
 	main_player.global_position = main_props.cell_center(start_cell)
 	var start_x := main_player.global_position.x
 	Input.action_press("walk_left")
-	for i in 60:
+	for i in 90:
 		await get_tree().physics_frame
 	Input.action_release("walk_left")
 	check("player moved towards the shore", main_player.global_position.x < start_x)
-	# 水墙应该把他挡在草地左边缘外(容一位小数的浮点误差)
-	var bank_x := _leftmost_grass_world_x(main)
-	check("water wall blocked the player", is_equal_approx(main_player.global_position.x, bank_x) or main_player.global_position.x > bank_x)
-	check("player did not walk into the water", main_player.global_position.x > bank_x - 2.0)
+
+	# 水墙要**正好贴着**草地的左沿。玩家脚下是个半径 5 的碰撞圆(见
+	# player.tscn 的 CircleShape2D_body),从右边撞一堵竖直的墙,圆心会停在
+	# 「草地左沿 + 5」上 —— 两边都要卡住,因为这里有两个相反的错法:
+	#
+	#   * 墙往里缩 -> 玩家还好端端站在草地上就撞到看不见的东西(走不到岸边)
+	#   * 墙往外扩 -> 玩家能走到水面上
+	#
+	# 而且只断言「没走进水里」也不够:第一种错法会通过。半径从场景里读,不写死,
+	# 免得以后改了碰撞形状忘了改测试。
+	var radius := ((main_player.get_node("CollisionShape2D") as CollisionShape2D).shape as CircleShape2D).radius
+	var edge_x := _leftmost_grass_edge_x(main)
+	var stopped_x := main_player.global_position.x
+	print("      岸边: 草左沿 x=%.1f, 玩家停在 x=%.1f, 期望 %.1f (贴边 + 圆半径 %.0f)" % [edge_x, stopped_x, edge_x + radius, radius])
+	var shoreline_ok := _failures
+	check("water wall stopped the player at the shore", stopped_x > edge_x)
+	check("water wall is flush with the shore (within 1px)", absf(stopped_x - (edge_x + radius)) <= 1.0)
+	if _failures > shoreline_ok:
+		# 只在挂了的时候打：每帧刷一屏道具/墙的信息会把控制台淹掉
+		_dump_shore(main, main_props, main_player)
 
 	await _test_tree_blocks_player(main_props, main_player)
 
@@ -626,8 +641,86 @@ func _tree_collision_bands(props: FarmProps) -> int:
 	return 0
 
 
-## 当前这一行最左边的草格,对应水岸的世界 x(玩家会被挡在这里)
-func _leftmost_grass_world_x(main: Node) -> float:
+## 草地层的图块必须正好是「按 peering 算出来的」那一组。
+##
+## 这是「草坪全是错的」那个 bug 的回归测试。它**不自己实现 8 位掩码**,
+## 而是拿同一个 TileSet 开一块临时 TileMapLayer、把同样的格子集合交给引擎的
+## `set_cells_terrain_connect()` 跑一遍,再逐格对比 —— 让引擎当标准答案。
+## 手抄那张 peering 表迟早就抄错,而错了也不会报错,只是画面不对。
+##
+## 另外单独断言「八邻全是草的那一格必须画 (1,1)」:这条是写给人看的,
+## 把「内部整块 vs 边块」到底指什么说清楚。
+func _test_grass_terrain(map: Node) -> void:
+	var grass: TileMapLayer = map.get_node("GameTilemap/grass")
+	var cells := grass.get_used_cells()
+	check("grass layer is painted", cells.size() > 100)
+
+	var scratch := TileMapLayer.new()
+	scratch.tile_set = grass.tile_set
+	scratch.set_cells_terrain_connect(cells, 0, 0, false)
+	var mismatched := 0
+	var distinct := {}
+	for cell in cells:
+		var atlas := grass.get_cell_atlas_coords(cell)
+		distinct[atlas] = true
+		if scratch.get_cell_atlas_coords(cell) != atlas:
+			mismatched += 1
+	check("grass tiles match the TileSet's own terrain peering", mismatched == 0)
+	check("the grass uses both interior and edge tiles", distinct.size() > 4)
+
+	var on_grass := {}
+	for cell in cells:
+		on_grass[cell] = true
+	var interior := Vector2i(-999, -999)
+	for cell in cells:
+		var surrounded := true
+		for dx in range(-1, 2):
+			for dy in range(-1, 2):
+				if not on_grass.has(cell + Vector2i(dx, dy)):
+					surrounded = false
+		if surrounded:
+			interior = cell
+			break
+	check("the grass has a fully surrounded cell", interior.x != -999)
+	check("a fully surrounded cell uses the interior tile",
+		grass.get_cell_atlas_coords(interior) == Vector2i(1, 1))
+	scratch.free()
+
+
+## 玩家在草地上走着走着被挡住了 —— 到底是水墙还是道具?
+## 两者的几何来源完全不同(水墙按水格算,道具碰撞按贴图 alpha 逐行算),
+## 分不清就只能瞎改,所以直接把附近的都打出来。
+func _dump_shore(main: Node, props: FarmProps, walker: Player) -> void:
+	var cell: Vector2i = props.to_local_cell(walker.global_position)
+	print("      玩家停在格 %s (x=%.1f y=%.1f)" % [cell, walker.global_position.x, walker.global_position.y])
+	var walls := main.get_node_or_null("FarmMap/WaterWalls")
+	if walls != null:
+		for child in walls.get_children():
+			var shape := child as CollisionShape2D
+			var box := shape.shape as RectangleShape2D
+			if absf(shape.global_position.y - walker.global_position.y) > 20.0:
+				continue
+			if absf(shape.global_position.x - walker.global_position.x) > 96.0:
+				continue
+			print("      水墙 x %.1f..%.1f  y=%.1f" % [shape.global_position.x - box.size.x * 0.5,
+				shape.global_position.x + box.size.x * 0.5, shape.global_position.y])
+	for entry in props.placed:
+		var prop_cell: Vector2i = entry["cell"]
+		if absi(prop_cell.x - cell.x) > 3 or absi(prop_cell.y - cell.y) > 3:
+			continue
+		print("      道具 %-4s %-14s 格 %s 占地 %s solid=%s" % [entry["kind"], entry["name"], prop_cell, entry["size"], entry["solid"]])
+	# 逐格问一句：这格到底算不算能走?四个集合的含义不一样，对不上就是 bug 在的地方
+	var walkable := props.reachable_from(cell)
+	for offset in range(-4, 1):
+		var probe := Vector2i(cell.x + offset, cell.y)
+		print("      格 %s: walkable=%-5s solid=%-5s blocked=%-5s grass=%s" % [probe,
+			walkable.has(probe), props.solid_cells.has(probe), props.blocked.has(probe),
+			props.grass_cells.has(probe)])
+
+
+## 当前这一行最左边的草格,它左边那条边所在的世界 x —— 也就是岸的位置
+## (水墙的右沿应该和它重合)
+func _leftmost_grass_edge_x(main: Node) -> float:
 	var map := main.get_node("FarmMap")
 	var grass: TileMapLayer = map.get_node("GameTilemap/grass")
 	var target := main.get_node("Player") as Player
@@ -637,4 +730,4 @@ func _leftmost_grass_world_x(main: Node) -> float:
 		if cell.y == row and cell.x < leftmost:
 			leftmost = cell.x
 	var center: Vector2 = grass.to_global(grass.map_to_local(Vector2i(leftmost, row)))
-	return center.x - 8.0 + 5.0   # 格子左边 + 玩家碰撞半径
+	return center.x - 8.0   # map_to_local 给的是格子中心,减半格才是格子外沿

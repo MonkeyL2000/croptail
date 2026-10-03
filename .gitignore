@@ -24,3 +24,7 @@ __pycache__/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 开发工具的中间产物(scenes/dev/retile.tscn 生成)
+/_retile*.bin
+/_retile_report.txt
