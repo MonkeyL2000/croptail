@@ -56,18 +56,18 @@ or open `project.godot` in the editor and hit F5.
 
 | Path | Contents |
 |---|---|
-| `scenes/main.tscn` | main scene: map + farm plot + player + HUD |
+| `scenes/main.tscn` | main scene: map + farm plot + player + pet dog + HUD |
 | `scenes/dev/selftest.tscn` | logic self-check scene (not the game) |
 | `scenes/world/farm_map.tscn` | water / grass / decor tile layers |
 | `scripts/core/` | autoloads (`GameState`, `TimeManager`) and main wiring |
 | `scripts/farm/` | `FarmPlot`, `FarmCell`, `CropData`, `CropDB` |
 | `scripts/player/` | player body + idle / walk / use states |
 | `scripts/state_machine/` | generic node-based FSM, game-agnostic |
-| `scripts/world/` | map collision (`farm_map.gd`), ground props + landmarks + gather rules (`farm_props.gd`, `prop_db.gd`), chickens (`chicken.gd`) |
+| `scripts/world/` | map collision (`farm_map.gd`), ground props + landmarks + gather rules (`farm_props.gd`, `prop_db.gd`), chickens (`chicken.gd`), pet dog (`dog.gd`) |
 | `scripts/ui/` | HUD and the icon atlases (`hud.gd`, `tool_icons.gd`, `item_icon.gd`) |
 | `docs/` | `PROGRESS.md` (where it is) and `DECISIONS.md` (why) |
 | `docs/art/` | generated reference images (map render, sheet grids, action layout, labelled prop sheet) |
-| `tools/` | offline generators / checkers (`check_props.py`, `annotate_*.py`, `render_map.py`, ...) |
+| `tools/` | offline generators / checkers (`check_props.py`, `annotate_*.py`, `pack_dog.py`, `render_map.py`, ...) |
 
 ## Self-check
 
@@ -78,11 +78,12 @@ hand — it drives the real scenes and prints a summary:
 godot --path . res://scenes/dev/selftest.tscn
 ```
 
-It ends with `=== SELFTEST END: N checks, 0 failed ===` (231 checks at the time
+It ends with `=== SELFTEST END: N checks, 0 failed ===` (260 checks at the time
 of writing) and covers soil rules, the growth cycle, sprite atlas coordinates
-(incl. "a prop rect must hold exactly one sprite"), state transitions, movement,
-main-scene wiring, the water collision walls, the fence pen / chickens, axe &
-pickaxe rules, and the ponds.
+(incl. "a prop rect must hold exactly one sprite" and "the pet dog's white
+background is keyed out"), state transitions, movement, main-scene wiring, the
+water collision walls, the fence pen / chickens, axe & pickaxe rules, the ponds,
+and the dog following the player around a wall.
 
 The prop table (`scripts/world/prop_db.gd`) also has an offline checker, because
 a rect that accidentally swallows a neighbouring sprite raises no error at all:
@@ -95,6 +96,11 @@ python tools/annotate_props.py     # -> docs/art/props_sheet.png (human review)
 ## Credits
 
 - Art — **Sprout Lands Basic Pack, by Cup Nooble** (required credit).
+- Pet dog sprite — supplied by the project owner (`game_source/Pets/`); **source
+  and licence not confirmed yet**, so treat that folder as "do not publish"
+  until it is. See `ASSET_CREDITS.md`.
+- HUD bitmap font — generated from **Noto Sans SC** (SIL OFL 1.1) by
+  `tools/gen_pixel_font.py`, so it may be redistributed with this repo.
 - Code — MIT-style: use it however you like.
 
 ## Roadmap

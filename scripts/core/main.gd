@@ -9,6 +9,9 @@ extends Node2D
 @onready var farm_props: FarmProps = $FarmMap/Props
 @onready var farm_map: Node2D = $FarmMap
 @onready var player: Player = $Player
+## 宠物狗。跟着玩家跑(自己重走玩家的脚印,见 dog.gd 的说明)。
+## 它和 TargetIndicator 一样必须在 Player **之后** —— 跟随的时候会踩着玩家的脚后跟。
+@onready var dog := $Dog
 ## 面前那一格的指示框。它在 main.tscn 里摆在 FarmMap / Player **之后**,
 ## 也就是盖在最上层 —— 角色精灵 48px 比一格还大,画在地面层时面朝上会把框整个挡住
 ## (拿真实截图的像素量出来的)。不用 z_index:负 z 会被父节点的 z 抵消下场,连底板都盖不住。
@@ -20,11 +23,14 @@ func _ready() -> void:
 	# Props 在它自己的 _ready() 里就撒好了,这里只补上「谁不能挡」这两条
 	farm_props.plot = farm_plot
 	farm_props.player = player
+	# 狗的出生点周围也留空,不然树会长在它身上(必须在 rebuild() 之前设)
+	farm_props.keep_clear = [dog.global_position]
 	farm_props.rebuild()
 
 	player.farm_plot = farm_plot
 	player.farm_props = farm_props
 	player.action_message.connect(hud.show_message)
+	dog.player = player
 	target_indicator.setup(player, farm_plot)
 	TimeManager.day_changed.connect(_on_day_changed)
 	_apply_camera_limits()

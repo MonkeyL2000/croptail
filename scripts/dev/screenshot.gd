@@ -33,10 +33,16 @@ func _ready() -> void:
 		_till_plot(main)
 	_dump_hud_geometry(main)
 	var player: Player = main.get_node("Player")
+	var dog := main.get_node_or_null("Dog")
 	for i in shots:
 		if i < spots.size():
 			player.global_position = spots[i]
 			player.camera.reset_smoothing()
+		# 狗是靠「重走玩家的脚印」跟的,截图里直接把它挪到旁边 —— 挪位置等于瞬移,
+		# 它的脚印会清空,不用等它跑过来(几个 spots 之间相距几百像素)
+		if dog != null:
+			dog.teleport_to(player.global_position + Vector2(-10, -18))
+			dog.set_facing(Vector2.DOWN)
 		if i < facings.size():
 			player.set_facing(facings[i])
 		for j in frames_between:

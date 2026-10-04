@@ -46,6 +46,9 @@ const CHICKEN_SCRIPT := preload("res://scripts/world/chicken.gd")
 @export var plot_path: NodePath = ^"../FarmPlot"
 var plot: FarmPlot
 var player: Node2D
+## 额外的「留空」世界坐标(main.gd 把宠物狗的出生点之类塞进来)。
+## 必须在 `rebuild()` **之前**设好 —— 撒点就在 rebuild 里跑。
+var keep_clear: Array[Vector2] = []
 
 ## 撒点的随机种子。固定值 => 每次进游戏森林长得一模一样。
 @export var placement_seed: int = 20261003
@@ -131,6 +134,12 @@ func _generate() -> void:
 		for x in range(landmark.position.x, landmark.end.x):
 			for y in range(landmark.position.y, landmark.end.y):
 				reserved[Vector2i(x, y)] = true
+	# 动物 / 宠物的落脚点周围 3x3 留空:撒点是不看物理体的,树会长到它们身上
+	for point in keep_clear:
+		var center := _to_cell(point - origin)
+		for dx in range(-1, 2):
+			for dy in range(-1, 2):
+				reserved[center + Vector2i(dx, dy)] = true
 
 	var candidates: Array[Vector2i] = []
 	for cell in grass_cells:

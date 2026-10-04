@@ -44,6 +44,10 @@ const PROP_PALETTE := {
 	],
 }
 
+## 宠物狗的脚本。和图里那些动物一样**不用 class_name** —— `preload` 拿它的常量和
+## 静态函数就够了(和 farm_props.gd 引 chicken.gd 一个路子)。
+const DogScript := preload("res://scripts/world/dog.gd")
+
 var _checks: int = 0
 var _failures: int = 0
 
@@ -852,9 +856,299 @@ func _test_main_scene() -> void:
 	await _test_tree_blocks_player(main_props, main_player)
 	_test_landmarks(main_props)
 	await _test_gather(main_props, main_player, indicator, main.get_node("HUD"))
-	_test_ponds(map, main_player, main_plot)
+	# 这里必须 await:它内部有 60 个物理帧的推墙循环。不 await 的话它会变成
+	# 「发射后不管」的协程,和后面的测试**抢玩家位置** —— 后果是它读到的
+	# 玩家位置是别的测试摆的(实测停在 416.8 而不是塘边的 -221)。
+	await _test_ponds(map, main_player, main_plot)
 	_test_prop_art()
 	_test_every_wood_variant_is_choppable(main_props)
+	await _test_dog(main, main_player)
+
+
+## 宠物狗:用户给的素材(`game_source/Pets/lilpuddinpuggums.png`)经
+## `tools/pack_dog.py` 处理成 `game_source/Pets/pug_walk.png`。
+func _test_dog(main: Node2D, walker: Player) -> void:
+	var dog := main.get_node_or_null("Dog")
+	check("main scene has the pet dog", dog != null)
+	if dog == null:
+		return
+	_test_dog_art(dog, main)
+	check("the dog draws after the player (so it is visible while following)",
+		dog.get_index() > walker.get_index())
+	await _test_dog_follow(main, dog, walker)
+
+
+## 狗的图集处理得对不对。三条都是**不报错**的错法,所以必须断言:
+##   1. 白底没抠 -> 游戏里狗屁股后面跟着一个白方块;
+##   2. 动画名和行对不上 -> 往右走却播朝左的帧(玩家那边栽过一次);
+##   3. 忘了缩小 -> 源图 26x24 的狗比 14x16 的农夫还大。
+func _test_dog_art(dog: Node2D, main: Node2D) -> void:
+	print("-- pet dog art (keyed white background + packed sheet)")
+	var sheet := load(DogScript.SHEET) as Texture2D
+	check("the packed dog sheet is 48x96 (3 cols x 4 rows of 16x24)",
+		sheet != null and sheet.get_size() == Vector2(DogScript.CELL.x * 3, DogScript.CELL.y * 4))
+
+	var sprite := dog.get_node_or_null("Sprite") as AnimatedSprite2D
+	check("the dog has a sprite", sprite != null)
+	if sprite == null:
+		return
+	var frames := sprite.sprite_frames
+	check("the dog has idle+walk for 4 directions (8 animations)",
+		frames.get_animation_names().size() == 8)
+
+	var rows_used := {}
+	var mapping_ok := true
+	for dir_name in DogScript.DIR_ROWS:
+		var row: int = DogScript.DIR_ROWS[dir_name]
+		rows_used[row] = true
+		for prefix in ["idle", "walk"]:
+			var anim := "%s_%s" % [prefix, dir_name]
+			if not frames.has_animation(anim):
+				mapping_ok = false
+				continue
+			var want := 1 if prefix == "idle" else DogScript.WALK_FRAMES
+			if frames.get_frame_count(anim) != want:
+				mapping_ok = false
+			for index in frames.get_frame_count(anim):
+				var atlas := frames.get_frame_texture(anim, index) as AtlasTexture
+				if atlas == null or atlas.atlas != sheet \
+						or atlas.region != DogScript.frame_rect(row, index):
+					mapping_ok = false
+	check("every dog animation takes its frames from its own row", mapping_ok)
+	check("the four directions use four different rows", rows_used.size() == 4)
+
+	# 逐像素过一遍每个走路帧
+	var empty_frames := 0
+	var ink_in_corner := 0
+	var min_height := 999
+	var max_height := 0
+	var min_x := 999
+	var max_x := -1
+	var tongue_front := 0
+	var tongue_back := 0
+	for dir_name in DogScript.DIR_ROWS:
+		for index in DogScript.WALK_FRAMES:
+			var image := _frame_image(frames.get_frame_texture("walk_%s" % dir_name, index))
+			if image == null:
+				continue
+			var box := _frame_bbox(image)
+			if box.size == Vector2i.ZERO:
+				empty_frames += 1
+				continue
+			min_height = mini(min_height, box.size.y)
+			max_height = maxi(max_height, box.size.y)
+			min_x = mini(min_x, box.position.x)
+			max_x = maxi(max_x, box.position.x + box.size.x)
+			if image.get_pixel(0, 0).a > 0.5:
+				ink_in_corner += 1
+			var tongue := _count_colours(image, [Color8(235, 47, 181), Color8(255, 69, 243)])
+			if dir_name == "front":
+				tongue_front += tongue
+			elif dir_name == "back":
+				tongue_back += tongue
+	check("no dog frame is empty", empty_frames == 0)
+	check("the white background is gone (frame corners are transparent)", ink_in_corner == 0)
+	check("the dog is scaled to farm size (%d..%d px tall; the farmer is 16)"
+		% [min_height, max_height], min_height >= 9 and max_height <= 14)
+	check("the front view shows the tongue, the back view does not (%d / %d)"
+		% [tongue_front, tongue_back], tongue_front > 0 and tongue_back == 0)
+	check("every frame keeps its content inside its cell (x %d..%d of %d)"
+		% [min_x, max_x, DogScript.CELL.x], min_x >= 0 and max_x <= DogScript.CELL.x)
+
+	# 左右两帧必须**逐像素**是镜像:差半个源像素的话,狗转身时会闪一下
+	var mirrored := 0
+	for index in DogScript.WALK_FRAMES:
+		var left := _frame_image(frames.get_frame_texture("walk_left", index))
+		var right := _frame_image(frames.get_frame_texture("walk_right", index))
+		if left != null and right != null and _is_mirror(left, right):
+			mirrored += 1
+	check("left frames are the exact mirror of right frames (%d)" % mirrored,
+		mirrored == DogScript.WALK_FRAMES)
+
+	# 原点当「地面上的落点」用,脚就必须落在原点上下 —— 偏了整只狗会浮在半空 /
+	# 掉到地底下(格子贴图偏移那种不报错的错法,见 DECISIONS#cell-sprites)
+	var feet := _dog_feet_offset(dog, sprite, frames)
+	print("      脚: 最低一行不透明像素在原点下方 %.1f px(期望 -1.0 上下)" % feet)
+	check("the dog's feet sit on its origin (within 2px)", absf(feet) <= 2.0)
+
+	# 白底素材必须已经被 tools/pack_dog.py 处理过:源图也是导入好的贴图,
+	# 直接引它一样能跑,只是游戏里会多一圈白 —— 所以比对像素而不是资源路径
+	check("the frames come from the packed sheet, not the raw white-bg source",
+		_frames_use_sheet(frames, sheet))
+
+
+## 动画是不是都取自这张图集(而不是源图 / 别的贴图)
+func _frames_use_sheet(frames: SpriteFrames, sheet: Texture2D) -> bool:
+	for anim_name in frames.get_animation_names():
+		for index in frames.get_frame_count(anim_name):
+			var atlas := frames.get_frame_texture(anim_name, index) as AtlasTexture
+			if atlas == null or atlas.atlas != sheet:
+				return false
+	return true
+
+
+## 一张帧图里不透明像素的包围盒(全透明返回零矩形)
+func _frame_bbox(image: Image) -> Rect2i:
+	var min_x := 1 << 30
+	var min_y := 1 << 30
+	var max_x := -1
+	var max_y := -1
+	for y in image.get_height():
+		for x in image.get_width():
+			if image.get_pixel(x, y).a > 0.5:
+				min_x = mini(min_x, x)
+				max_x = maxi(max_x, x)
+				min_y = mini(min_y, y)
+				max_y = maxi(max_y, y)
+	if max_x < 0:
+		return Rect2i(0, 0, 0, 0)
+	return Rect2i(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+
+
+## 图里这几种颜色各有多少个不透明像素(容差 0.02:导入后颜色是浮点)
+func _count_colours(image: Image, colours: Array) -> int:
+	var found := 0
+	for y in image.get_height():
+		for x in image.get_width():
+			var c := image.get_pixel(x, y)
+			if c.a <= 0.5:
+				continue
+			for want in colours:
+				if absf(c.r - want.r) < 0.02 and absf(c.g - want.g) < 0.02 \
+						and absf(c.b - want.b) < 0.02:
+					found += 1
+					break
+	return found
+
+
+## 帧里最低那行不透明像素,离狗自己的 position 有多远(世界 px,正 = 更低)。
+## 走精灵自己的变换算:第 r 行的世界 y = position + offset - CELL.y/2 + r
+## (centered = true,所以贴图中心在 position + offset)。
+func _dog_feet_offset(dog: Node2D, sprite: AnimatedSprite2D, frames: SpriteFrames) -> float:
+	var bottom := -1
+	for anim_name in frames.get_animation_names():
+		for index in frames.get_frame_count(anim_name):
+			var image := _frame_image(frames.get_frame_texture(anim_name, index))
+			if image == null:
+				continue
+			var box := _frame_bbox(image)
+			if box.size.y > 0:
+				bottom = maxi(bottom, box.position.y + box.size.y - 1)
+	if bottom < 0:
+		return 999.0
+	return sprite.global_position.y + sprite.offset.y - DogScript.CELL.y * 0.5 \
+		+ bottom - dog.global_position.y
+
+
+## 跟随:狗靠「重走玩家的脚印」绕开实心物件,所以这里不但验它跟得上,
+## 还真的造一堵墙让玩家绕过去 —— 直线追的实现会顶死在墙上,这一条会挂。
+##
+## 位置不写死随机地形:整段测试都在出生点周围 `spawn_clear_cells` 那 7x7 格里,
+## 那几格是撒道具时就被保留的空地(见 farm_props.gd 的 keep_clear / reserved)。
+func _test_dog_follow(main: Node2D, dog: Node2D, walker: Player) -> void:
+	print("-- pet dog follows the player")
+	check("the dog cannot push the player around (layer 2, mask 1)",
+		dog.collision_layer == 2 and dog.collision_mask == 1
+		and (walker.collision_mask & dog.collision_layer) == 0)
+
+	var props := main.get_node("FarmMap/Props") as FarmProps
+	var spawn_cell: Vector2i = props.to_local_cell(dog.global_position)
+	check("the dog spawns on a walkable grass cell",
+		props.grass_cells.has(spawn_cell) and not props.solid_cells.has(spawn_cell))
+	check("nothing was scattered onto the dog's spawn", props.prop_at(spawn_cell).is_empty())
+
+	# 让玩家自己的状态机安静下来:这段测试靠手推 velocity + move_and_slide,
+	# 合成按键不可靠(见 DECISIONS#synthetic-input)
+	(walker.get_node("StateMachine") as NodeFiniteStateMachine).on_state_transition("idle")
+	var wall := _make_test_wall(Rect2(420, 238, 8, 56))
+	add_child(wall)
+
+	walker.global_position = Vector2(400, 250)
+	dog.teleport_to(Vector2(368, 250))
+	await _step_physics(4)
+	var start_gap := dog.global_position.distance_to(walker.global_position)
+
+	var path: Array[Vector2] = [Vector2(412, 225), Vector2(438, 225), Vector2(438, 250)]
+	var dog_min_y := dog.global_position.y
+	var frames_used := 0
+	for point in path:
+		while walker.global_position.distance_to(point) > 2.0 and frames_used < 400:
+			walker.velocity = (point - walker.global_position).normalized() * Player.SPEED
+			walker.move_and_slide()
+			await get_tree().physics_frame
+			frames_used += 1
+			dog_min_y = minf(dog_min_y, dog.global_position.y)
+	walker.velocity = Vector2.ZERO
+	for i in 150:
+		await get_tree().physics_frame
+		dog_min_y = minf(dog_min_y, dog.global_position.y)
+
+	var gap := dog.global_position.distance_to(walker.global_position)
+	print("      跟随: 距离 %.1f -> %.1f px,狗最高走到 y=%.1f(墙顶 238)" % [start_gap, gap, dog_min_y])
+	check("the dog caught up with the player (%.0f -> %.0f px)" % [start_gap, gap],
+		gap <= DogScript.FOLLOW_GAP + 8.0)
+	check("the dog walked around the wall instead of into it", dog_min_y < 238.0)
+	check("the dog stopped short instead of standing on the player", gap > 1.0)
+	var sprite := dog.get_node("Sprite") as AnimatedSprite2D
+	check("the dog idles once it caught up (anim '%s')" % sprite.animation,
+		sprite.animation.begins_with("idle_"))
+	# 停下来要**面朝玩家**,不是面朝上一段路。规矩和 set_facing 一样:只认主轴。
+	# (第一版这里写死 'right' 报错了 —— 狗绕完墙停在玩家上方,面朝下才是对的。)
+	check("the dog faces the player once it stops (facing '%s')" % dog.dir_suffix(),
+		dog.facing == _facing_towards(walker.global_position - dog.global_position))
+	check("the dog ended up on grass, not in the water",
+		props.grass_cells.has(props.to_local_cell(dog.global_position)))
+
+	# 走起来要播走路动画,而且朝向跟着走的方向变。
+	# 顺序要紧:先把玩家摆好并等两帧(脚印里会记下他当时的位置),
+	# 再把狗放到玩家**右边** 40px 处并清空脚印 —— 不清脚印、不等这两帧的话,
+	# 脚印里留着旧位置,狗会先往右跑一段,这个断言就测反了。
+	walker.global_position = Vector2(360, 250)
+	await _step_physics(2)
+	dog.teleport_to(Vector2(400, 250))
+	await _step_physics(2)
+	walker.global_position = Vector2(330, 250)
+	var walk_anim := ""
+	var facing_while_walking := Vector2.ZERO
+	for i in 40:
+		await get_tree().physics_frame
+		if dog.global_position.distance_to(walker.global_position) > DogScript.FOLLOW_GAP:
+			walk_anim = sprite.animation
+			facing_while_walking = dog.facing
+	check("the dog plays the walk animation while moving ('%s')" % walk_anim,
+		walk_anim.begins_with("walk_"))
+	check("the dog faces left when the player is to its left ('%s')"
+		% _facing_name(facing_while_walking), facing_while_walking == Vector2.LEFT)
+
+	wall.queue_free()
+
+
+## 朝向的规矩(和 dog.gd::set_facing 一致):只看主轴,斜着走不来回抽
+func _facing_towards(offset: Vector2) -> Vector2:
+	if absf(offset.x) > absf(offset.y):
+		return Vector2.RIGHT if offset.x > 0.0 else Vector2.LEFT
+	return Vector2.DOWN if offset.y > 0.0 else Vector2.UP
+
+
+## 临时的一堵墙(层 1 = 和水墙同一层),用来验「狗是绕过去的」
+func _make_test_wall(rect: Rect2) -> StaticBody2D:
+	var body := StaticBody2D.new()
+	body.name = "TestWall"
+	body.collision_layer = 1
+	body.collision_mask = 0
+	body.position = rect.position + rect.size * 0.5
+	var shape := CollisionShape2D.new()
+	var box := RectangleShape2D.new()
+	box.size = rect.size
+	shape.shape = box
+	body.add_child(shape)
+	return body
+
+
+## 等几个物理帧
+func _step_physics(frames: int) -> void:
+	for i in frames:
+		await get_tree().physics_frame
 
 
 ## 手摆地标:围栏圈 / 鸡舍 / 鸡。

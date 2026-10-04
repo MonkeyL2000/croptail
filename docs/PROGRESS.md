@@ -30,6 +30,8 @@
 | 工具 | 6 把:锄/水壶/种子/收获(作用在农田)+ 斧/镐(作用在地面物件)。斧/镐的名字是**像素推断**的,见 `docs/DECISIONS.md#gather-tools` 和 `docs/art/tools_objects.png` |
 | TileSet | `res://tilesets/test_tilemap.tres`(旧名沿用;水墙碰撞由 `farm_map.gd` 运行时生成) |
 | 玩家 | `res://scenes/characters/player.tscn`(32 个动画 = idle/walk x 4 朝向 + 6 把工具 x 4 朝向;由 `tools/gen_player_scene.py` 生成) |
+| 宠物 | 一只狗 `Dog`(`scripts/world/dog.gd`,挂在 `main.tscn` 的 `Player` 后面),跟在玩家屁股后面(每隔 6px 记一个脚印、重走脚印 —— 直线追会顶在树上)。素材是用户另外给的**外部素材**:白底原图 `game_source/Pets/lilpuddinpuggums.png` 经 `tools/pack_dog.py` 抠底+缩一半成 `pug_walk.png`(48x96 = 3x4 格 16x24) |
+| 宠物对照图 | `python tools/pack_dog.py`(顺带写 `docs/art/pug_sheet.png`:源图带格线 + 成品放大 8 倍 + 方向标注调色板) |
 | HUD | `res://scenes/ui/hud.tscn` + `scripts/ui/hud.gd`(字体由 `tools/gen_pixel_font.py` 生成):顶栏 + 左下工具条(6 格)+ 右下背包 + 材料格(木/石) |
 | 目标格指示框 | `scripts/farm/target_indicator.gd`(挂在 `main.tscn` 的 `TargetIndicator`,画在**所有东西之上**) |
 | 截图前的准备 | 截图工具默认把整块农田锄一遍(`till_plot`),好核对「土块有没有和格子对齐」 |
@@ -188,6 +190,24 @@
     和 `_test_every_wood_variant_is_choppable()`(按变体名把 10 种树/木头全砍一遍)。
   - **自检 223 → 231 项**,截图复核:地形/土块和改动前**逐像素一致**(156290 个地形像素里只有 77 个变),
     变化全在道具和 HUD 上 —— 说明改的只有素材。
+- [x] **2026-10-04 加宠物狗(用户给的外部素材)**:
+      用户给了 `lilpuddinpuggums.png`(96x192、白底、3 列 x 4 行、每格 32x48),
+      要求加进游戏。处理流程和坑全写在 `docs/DECISIONS.md#dog-pet`。要点:
+  - 白底**全部和画布边缘连通**(没有一处被围住的白)→ 可以安全抠成透明。
+  - 原图是 **2 倍整数放大**(18432 个像素里只有 152 对不同)→ 2:1 取样缩小,不插值;
+    左右两行的**镜像轴落在半个源像素上**,朝右那行得从奇数 x 开始取样,否则左右帧
+    不是精确镜像(转身会闪)。改完验过 0 个像素不同。
+  - 撑到农场尺寸:0.5 倍后 11~12px 高,和鸡一个量级(农夫 14x16)。
+  - 精灵 `offset = (0, -12)` 让**原点落在狗脚下**;自检直接量「最低一行不透明像素
+    在原点下方多远」—— 符号写反会整只狗挂到地底下,而那种错**不报错**。
+  - 跟随**不用直线追**(道具散在草地上,直线必顶树),而是**重走玩家的脚印**;
+    跟上了就停下、面朝玩家;卡住 0.35s 就丢一个脚印点。
+  - 图层 2/掩码 1:**狗不挡玩家**,自己也不穿水/树(自检双向断言)。
+    撒道具时 `farm_props.keep_clear` 给每只动物留 3x3 格,免得树长在狗身上。
+  - 截图工具会把狗挪到玩家旁边(共 3 张都验过:狗的调色板像素只出现在预测的那 13x12 框里)。
+  - 顺手揪出一个**假失败**:`_test_ponds()` 内部有 60 帧推墙循环却没被 await,
+    变成发射后不管的协程、和后面的测试**抢玩家位置**(见 `docs/DECISIONS.md#selftest-await`)。
+  - **自检 231 → 260 项**。
 
 ## Next(按顺序做)
 
@@ -214,6 +234,9 @@
 6. **还没用上的素材**:`Wood_Bridge.png`(过池塘的桥 —— 现在塘是实心的,要造桥就得
    在塘上开一条通道并把水墙断开)、`Paths.png`(砌小径)、`Basic_Furniture.png`、
    `Free Cow Sprites.png` + `Simple_Milk_and_grass_item.png`(牛奶产线)。
+7. **狗的后续**(可选):现在只会跟着走,不叫也不捡东西。要加「按 F 摸摸头 /
+   它会去追鸡 / 存档里记住它」都是往 `dog.gd` 里加,不碰其他系统。
+   另外它是**外部素材**,授权没确认前不要发 release(见下)。
 
 ## 卡点 / 风险
 
@@ -240,39 +263,46 @@
   `stump_tiny`(全是木色,7x7 / 8x9)、`rock_mossy`(带苔的灰石)。
   对照图:`docs/art/props_sheet.png`(每条 rect 描边 + 编号,下面列出名字/kind/rect)。
   名字只影响可读性,**不影响玩法** —— kind 已经按调色板定过,自检会钉住。
+- ⚠️ **待确认 4(等用户回话):宠物狗素材的来源 / 授权**。文件名
+  `lilpuddinpuggums.png` 看着像某份第三方 itch.io 素材(或用户自己/委托画的),
+  仓库是**公开**的,Sprout Lands 的「非商业 + 禁止 AI 训练」也不管不到它。
+  需要问清:作者、链接、允许公开 / 商用 / 再分发吗。若不允许公开,
+  就把 `game_source/Pets/` 加进 `.gitignore`(游戏照常能跑,只是别人 clone 后没这只狗)。
+  对照图:`docs/art/pug_sheet.png`(建议让用户顺便看一眼形状/方向对不对)。
 - 没有音频素材(原包里就没有)。
 
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
-  → **`=== SELFTEST END: 231 checks, 0 failed ===`**,ERROR 区为空。本轮新增的关键几条:
-  - `no prop rect has a neighbour glued in (47 rects)` —— 主色家族 ∪ 阴影的包围盒必须等于 rect
-  - `every prop kind matches its palette`(`rock` 必须灰且粉 ≤5%、`wood` 必须木色、`tree` 必须有绿冠 + 木干)
-  - `no prop sprite is bigger than its footprint cells` / `no decor prop is solid`
-  - `every tree / wood variant found in the world can be chopped (10 of 10 variants, 0 refused)`
-    —— 按**变体名**遍历,把世界里出现的每一种树/木头都真砍一遍(只测一棵会漏掉 kind 写错的变体)
-- `python tools/check_props.py` → **`0 problems, 0 warnings`**(47/47 干净;两张图集里的精灵全部已登记)
-- `python tools/annotate_props.py` → `docs/art/props_sheet.png`(1304x1286,人工核对用)
+  → **`=== SELFTEST END: 260 checks, 0 failed ===`**,ERROR 区为空(只有一条已知无害的
+  `NodeFiniteStateMachine: 未知状态 'nonexistent'` 警告)。本轮新增的关键几条:
+  - `the white background is gone (frame corners are transparent)` —— 白底抠干净了
+  - `the dog is scaled to farm size (11..12 px tall; the farmer is 16)`
+  - `the front view shows the tongue, the back view does not (9 / 0)` —— 靠舌头色定正/反面
+  - `left frames are the exact mirror of right frames (3)` —— 镜像相位对上了
+  - `the dog's feet sit on its origin (within 2px)`(实测 -1.0)
+  - `the dog walked around the wall instead of into it`(狗最高走到 y=225.5、墙顶 238)
+  - `the dog caught up with the player (29 -> 19 px)` / `the dog faces the player once it stops`
+  - 池塘回归恢复:落点 -221.0、期望 -221.0、差 **0.0**(之前那个假失败已修)
 - 截图复核:`run_project {scene: "res://scenes/dev/screenshot.tscn"}` → `screenshots/shot_1..3.png`,
-  和改动前的三张逐像素比:**地形 + 农田土块完全一致**
-  (两张图共有 156290 个「草地/水/土」像素,其中只有 **77** 个变;
-  锄满农田后土块在预测矩形 (304,66)-(496,178) = 192x112 里的像素数两轮都是 21248),
-  差异全落在道具和 HUD 文字上 —— 说明改的只有素材。
+  三张里狗的调色板像素(`(196,98,0)` / `(255,168,92)` / `(52,36,36)` / 舌头粉)都**只出现在**
+  「世界坐标 + canvas xform」算出来的那个 13x12 框里(shot_1 里全画面同色计数和框内计数相等,
+  即这几颜色在画面里没有第二处来源)。
+- 宠物狗图集:`python tools/pack_dog.py` → `game_source/Pets/pug_walk.png`(48x96),
+  对照图 `docs/art/pug_sheet.png`;离线自验:每个帧的内容盒 11~12px 高、四角 alpha = 0、
+  正面/侧面有舌头而背面 0 个、左右帧 0 个像素不同。
+- `python tools/check_props.py` → **`0 problems, 0 warnings`**(47/47 干净)
 - 主场景 `run_project {projectPath: "D:\\godot_projects\\croptail"}`:仅
   `[farm_props] 347 props (83 tree / 35 rock / 27 wood / 183 deco / 18 fence / 1 house) on 1587 open cells; 1587 collision boxes`
   + `[farm_map] water walls: 101 collision shapes`,**无 ERROR**
-- 上一轮那些回归依然全绿(`the axe fells the whole tree, not just one cell`、
+  (道具数量/空地数和加狗之前**一模一样** —— 狗出生点周围那 3x3 格本来就在保留区里)
+- 上一轮那些回归依然全绿(道具 `_test_prop_art()`、`every tree / wood variant found in the world can be chopped (10 of 10)`、
   `the soil sprite covers exactly its own cell`、`tilling repaints nothing outside that cell` 256/256、
-  `every fence piece stands on a grass cell`、`every chicken is animating from a 2-frame sheet`、
   `the pond wall is flush with the water edge` 差 0.0px、`water wall is flush with the shore` 草沿 -264/玩家 -259)
 - `scripts/dev/retile.gd` → **`REFERENCE CHECK: PASS`**(263 格标准答案 0 差异;本轮没改地图形状)
-- 上一轮(斧/镐 + 池塘 + 地标)的证据仍然成立:池塘截图里预测范围内的 18319 px
-  全是水色 `(155,212,195)`、shot_2 围栏里检出 2 团鸡身奶油色 `(243,242,192)`、
-  `the island has ponds carved into it` 等 21 条斧/镐用例。
 - 离线工具:`python tools/render_map.py docs/art/map.png`(1152x736 整张地形图)、
-  `python tools/annotate_terrain.py`(`docs/art/terrain_*.png`)、
-  `python tools/annotate_objects.py`(`docs/art/tools_objects.png`,斧/镐/围栏/鸡舍对照图)
-- 日期:2026-10-03
+  `python tools/check_props.py`、`python tools/annotate_props.py`(`docs/art/props_sheet.png`)
+- 日期:2026-10-04
 
 
 ## 待补的记录
