@@ -38,9 +38,18 @@ const PEN_RECT := Rect2i(33, 3, 7, 6)
 const HOUSE_RECT := Rect2i(35, 0, 3, 3)
 ## 圈里养几只鸡
 const CHICKEN_COUNT := 2
+## 牧场:同一套围栏拼法,位置贴在鸡圈下面(农田右边那一列)。
+## 比鸡圈高,因为牛比鸡大得多 —— 活动范围要往里收半头牛才不会画到围栏上
+const PASTURE_RECT := Rect2i(33, 10, 7, 9)
+## 牧场里养几头牛
+const COW_COUNT := 2
+## 牛的贴图是 28x17(鸡才 11x12),活动范围从围栏往里再收这么多像素
+const COW_ROAM_INSET := 18.0
 
 ## 鸡的脚本。不用 class_name:`preload` 就行,少一次「新 class_name 要跑一遍编辑器」
 const CHICKEN_SCRIPT := preload("res://scripts/world/chicken.gd")
+## 牛的脚本。同理
+const COW_SCRIPT := preload("res://scripts/world/cow.gd")
 
 @export var map_path: NodePath = ^".."
 @export var plot_path: NodePath = ^"../FarmPlot"
@@ -129,8 +138,8 @@ func _generate() -> void:
 		for x in range(-plot_margin, plot.columns + plot_margin):
 			for y in range(-plot_margin, plot.rows + plot_margin):
 				reserved[plot_origin + Vector2i(x, y)] = true
-	# 鸡圈和鸡舍那几格先占掉,不然树会长到圈里面
-	for landmark in [PEN_RECT, HOUSE_RECT]:
+	# 鸡圈、鸡舍、牧场那几格先占掉,不然树会长到圈里面
+	for landmark in [PEN_RECT, HOUSE_RECT, PASTURE_RECT]:
 		for x in range(landmark.position.x, landmark.end.x):
 			for y in range(landmark.position.y, landmark.end.y):
 				reserved[Vector2i(x, y)] = true
@@ -258,28 +267,18 @@ func _place_named(prop_name: String, cell: Vector2i, size: Vector2i = Vector2i.Z
 	return _spawn(prop_name, cell, size, data["kind"])
 
 
-## 围栏圈 + 鸡舍 + 鸡。不随机,位置就是 PEN_RECT / HOUSE_RECT。
+## 围栏圈 + 鸡舍 + 鸡 + 牧场 + 牛。不随机,位置就是下面的 PEN_RECT / HOUSE_RECT / PASTURE_RECT。
 ##
 ## 围栏拼法:`Tilesets/Fences.png` 每格都是「一根柱子 + 左右横杆」,
 ## 横排一段的左端用 `fence_end_left`(柱+右杆)、中间用 `fence_mid`(柱+左右杆)、
 ## 右端用 `fence_end_right`(柱+左杆),相邻两格的横杆会在格线上接住。
 func _place_landmarks() -> void:
-	for y in [PEN_RECT.position.y, PEN_RECT.end.y - 1]:
-		for x in range(PEN_RECT.position.x, PEN_RECT.end.x):
-			var piece := "fence_mid"
-			if x == PEN_RECT.position.x:
-				piece = "fence_end_left"
-			elif x == PEN_RECT.end.x - 1:
-				piece = "fence_end_right"
-			_place_named(piece, Vector2i(x, y))
-	# 右侧一列柱子(左边留口)
-	for y in range(PEN_RECT.position.y + 1, PEN_RECT.end.y - 1):
-		_place_named("fence_post", Vector2i(PEN_RECT.end.x - 1, y))
-
+	_place_fence(PEN_RECT)
 	_place_named("chicken_house", HOUSE_RECT.position, HOUSE_RECT.size)
+	_place_fence(PASTURE_RECT)
 
 	# 鸡:养在圈里。不走物理,只在自己那一小块矩形里随机游荡
-	var roam := _pen_interior_rect()
+	var roam := _interior_rect(PEN_RECT)
 	for index in CHICKEN_COUNT:
 		var chicken: Node2D = CHICKEN_SCRIPT.new()
 		chicken.name = "Chicken_%d" % index
@@ -288,12 +287,49 @@ func _place_landmarks() -> void:
 		chicken.position = roam.position + roam.size * 0.5
 		_root.add_child(chicken)
 
+	# 牛:和鸡同一套逻辑,但它的贴图比鸡大一圈 —— 活动范围要往里再收
+	# COW_ROAM_INSET,不然牛头/牛屁股会画到围栏上
+	var cow_roam := _cow_roam_rect()
+	for index in COW_COUNT:
+		var cow: Node2D = COW_SCRIPT.new()
+		cow.name = "Cow_%d" % index
+		cow.set("roam_area", cow_roam)
+		cow.set("rng_seed", _rng.randi())
+		cow.position = cow_roam.position + cow_roam.size * 0.5
+		_root.add_child(cow)
 
-## 鸡圈里面那一块(格 -> 本地像素),给鸡当活动范围
-func _pen_interior_rect() -> Rect2:
-	var top_left := PEN_RECT.position + Vector2i.ONE
-	var size := PEN_RECT.size - Vector2i(2, 2)
+
+## 一段围栏:上下各一条横排 + 右边一列柱子。
+## **左边留口**:玩家能走进去,也免得圈里的地变成走不到的死角
+## (自检里那条「可行走格 90% 连通」会被死角拖下去)。
+func _place_fence(rect: Rect2i) -> void:
+	for y in [rect.position.y, rect.end.y - 1]:
+		for x in range(rect.position.x, rect.end.x):
+			var piece := "fence_mid"
+			if x == rect.position.x:
+				piece = "fence_end_left"
+			elif x == rect.end.x - 1:
+				piece = "fence_end_right"
+			_place_named(piece, Vector2i(x, y))
+	for y in range(rect.position.y + 1, rect.end.y - 1):
+		_place_named("fence_post", Vector2i(rect.end.x - 1, y))
+
+
+## 围栏圈里面那块空地(格 -> 本地像素),给圈里的动物当活动范围
+func _interior_rect(rect: Rect2i) -> Rect2:
+	var top_left := rect.position + Vector2i.ONE
+	var size := rect.size - Vector2i(2, 2)
 	return Rect2(Vector2(top_left) * CELL_SIZE, Vector2(size) * CELL_SIZE)
+
+
+## 鸡圈里面那一块(鸡和自检都在用,单独留个名字)
+func _pen_interior_rect() -> Rect2:
+	return _interior_rect(PEN_RECT)
+
+
+## 牧场里面那一块,再往里收掉半头牛
+func _cow_roam_rect() -> Rect2:
+	return _interior_rect(PASTURE_RECT).grow(-COW_ROAM_INSET)
 
 
 ## --- 斧 / 镐:对地面上的物件动手 -------------------------------------------

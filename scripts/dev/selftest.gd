@@ -47,6 +47,8 @@ const PROP_PALETTE := {
 ## 宠物狗的脚本。和图里那些动物一样**不用 class_name** —— `preload` 拿它的常量和
 ## 静态函数就够了(和 farm_props.gd 引 chicken.gd 一个路子)。
 const DogScript := preload("res://scripts/world/dog.gd")
+## 牛的脚本。同理
+const CowScript := preload("res://scripts/world/cow.gd")
 
 var _checks: int = 0
 var _failures: int = 0
@@ -855,6 +857,7 @@ func _test_main_scene() -> void:
 
 	await _test_tree_blocks_player(main_props, main_player)
 	_test_landmarks(main_props)
+	await _test_pasture(main_props)
 	await _test_gather(main_props, main_player, indicator, main.get_node("HUD"))
 	# 这里必须 await:它内部有 60 个物理帧的推墙循环。不 await 的话它会变成
 	# 「发射后不管」的协程,和后面的测试**抢玩家位置** —— 后果是它读到的
@@ -872,7 +875,7 @@ func _test_dog(main: Node2D, walker: Player) -> void:
 	check("main scene has the pet dog", dog != null)
 	if dog == null:
 		return
-	_test_dog_art(dog, main)
+	_test_dog_art(dog)
 	check("the dog draws after the player (so it is visible while following)",
 		dog.get_index() > walker.get_index())
 	await _test_dog_follow(main, dog, walker)
@@ -882,7 +885,7 @@ func _test_dog(main: Node2D, walker: Player) -> void:
 ##   1. 白底没抠 -> 游戏里狗屁股后面跟着一个白方块;
 ##   2. 动画名和行对不上 -> 往右走却播朝左的帧(玩家那边栽过一次);
 ##   3. 忘了缩小 -> 源图 26x24 的狗比 14x16 的农夫还大。
-func _test_dog_art(dog: Node2D, main: Node2D) -> void:
+func _test_dog_art(dog: Node2D) -> void:
 	print("-- pet dog art (keyed white background + packed sheet)")
 	var sheet := load(DogScript.SHEET) as Texture2D
 	check("the packed dog sheet is 48x96 (3 cols x 4 rows of 16x24)",
@@ -967,7 +970,7 @@ func _test_dog_art(dog: Node2D, main: Node2D) -> void:
 
 	# 原点当「地面上的落点」用,脚就必须落在原点上下 —— 偏了整只狗会浮在半空 /
 	# 掉到地底下(格子贴图偏移那种不报错的错法,见 DECISIONS#cell-sprites)
-	var feet := _dog_feet_offset(dog, sprite, frames)
+	var feet := _sprite_feet_offset(dog, sprite, frames, float(DogScript.CELL.y))
 	print("      脚: 最低一行不透明像素在原点下方 %.1f px(期望 -1.0 上下)" % feet)
 	check("the dog's feet sit on its origin (within 2px)", absf(feet) <= 2.0)
 
@@ -1021,10 +1024,12 @@ func _count_colours(image: Image, colours: Array) -> int:
 	return found
 
 
-## 帧里最低那行不透明像素,离狗自己的 position 有多远(世界 px,正 = 更低)。
-## 走精灵自己的变换算:第 r 行的世界 y = position + offset - CELL.y/2 + r
-## (centered = true,所以贴图中心在 position + offset)。
-func _dog_feet_offset(dog: Node2D, sprite: AnimatedSprite2D, frames: SpriteFrames) -> float:
+## 帧里最低那行不透明像素,离这个动物自己的 position 有多远(世界 px,正 = 更低)。
+## 走精灵自己的变换算:第 r 行的世界 y = position + offset - cell_h/2 + r
+## (centered = true,所以贴图中心在 position + offset)。狗和牛共用这一条
+## —— 它们的原点都该落在**脚**上(符号写反动物就浮空/钻地,而且不报错)。
+func _sprite_feet_offset(body: Node2D, sprite: AnimatedSprite2D, frames: SpriteFrames,
+		cell_h: float) -> float:
 	var bottom := -1
 	for anim_name in frames.get_animation_names():
 		for index in frames.get_frame_count(anim_name):
@@ -1036,8 +1041,8 @@ func _dog_feet_offset(dog: Node2D, sprite: AnimatedSprite2D, frames: SpriteFrame
 				bottom = maxi(bottom, box.position.y + box.size.y - 1)
 	if bottom < 0:
 		return 999.0
-	return sprite.global_position.y + sprite.offset.y - DogScript.CELL.y * 0.5 \
-		+ bottom - dog.global_position.y
+	return sprite.global_position.y + sprite.offset.y - cell_h * 0.5 \
+		+ bottom - body.global_position.y
 
 
 ## 跟随:狗靠「重走玩家的脚印」绕开实心物件,所以这里不但验它跟得上,
@@ -1177,7 +1182,8 @@ func _test_landmarks(props: FarmProps) -> void:
 		if kind == "fence" or kind == "house":
 			continue
 		if _rect_overlaps(entry["cell"], entry["size"], FarmProps.PEN_RECT) \
-				or _rect_overlaps(entry["cell"], entry["size"], FarmProps.HOUSE_RECT):
+				or _rect_overlaps(entry["cell"], entry["size"], FarmProps.HOUSE_RECT) \
+				or _rect_overlaps(entry["cell"], entry["size"], FarmProps.PASTURE_RECT):
 			intruders += 1
 	check("nothing grows inside the pen", intruders == 0)
 
@@ -1207,6 +1213,135 @@ func _test_landmarks(props: FarmProps) -> void:
 			animating += 1
 	check("every chicken stays inside the pen", chickens.size() > 0 and inside == chickens.size())
 	check("every chicken is animating from a 2-frame sheet", animating == chickens.size())
+
+
+## 牧场和牛。这里三条都是**不报错但看得见**的错法:
+##   1. 图集是 3 列 x 2 行,但**第 2 行只有 2 帧**(第 3 格是全透明的)——
+##      按规则网格放 3 帧,走路动画会闪一下空白;
+##   2. 精灵原点得落在**牛脚**上(和 dog.gd 同一类错:符号写反牛就浮空/钻地);
+##   3. 牛是不走物理的装饰动物,只有一个 Node2D —— 变成实体它就会把玩家顶开。
+func _test_pasture(props: FarmProps) -> void:
+	print("-- pasture (cows)")
+	check("the pasture is fenced too", props.count_kind("fence") >= 30)
+
+	var sheet := load(CowScript.SHEET) as Texture2D
+	check("the cow sheet is 96x64 (3 cols x 2 rows of 32x32)",
+		sheet != null and sheet.get_size() == Vector2(96, 64))
+
+	var cows: Array[Node] = []
+	for child in props.get_node("Props").get_children():
+		if String(child.name).begins_with("Cow_"):
+			cows.append(child)
+	check("the pasture has cows", cows.size() == FarmProps.COW_COUNT)
+
+	var roam: Rect2 = props.call("_cow_roam_rect")
+	check("the cow's roaming area is inset from the fence (%dx%dpx)" % [roam.size.x, roam.size.y],
+		roam.size.x > 0.0 and roam.size.y > 0.0
+		and roam.position.x >= FarmProps.PASTURE_RECT.position.x * 16.0
+		and roam.end.y <= FarmProps.PASTURE_RECT.end.y * 16.0)
+
+	var inside := 0
+	var wired := 0
+	var feet_ok := 0
+	var wide := 0
+	var tall := 0
+	var physical := 0
+	for cow in cows:
+		if roam.has_point(cow.position):
+			inside += 1
+		if cow.get_node_or_null("CollisionShape2D") != null or cow is CharacterBody2D:
+			physical += 1
+		var sprite := cow.get_node_or_null("Sprite") as AnimatedSprite2D
+		if sprite == null:
+			continue
+		var frames := sprite.sprite_frames
+		if frames.has_animation("idle") and frames.get_frame_count("idle") == 3 \
+				and frames.has_animation("walk") and frames.get_frame_count("walk") == 2 \
+				and sprite.is_playing():
+			wired += 1
+		if absf(_sprite_feet_offset(cow, sprite, frames, float(CowScript.CELL))) <= 2.0:
+			feet_ok += 1
+		# 身体尺寸:牛必须比农夫大(28x17 vs 14x16),不然就是缩错过了
+		var box := _widest_frame_box(frames)
+		if box.size.x >= 20:
+			wide += 1
+		if box.size.y >= 14:
+			tall += 1
+		if _empty_frame_count(frames) > 0:
+			print("      ⚠ 牛的图集里有全透明的帧")
+
+	check("every cow stays inside the pasture", cows.size() > 0 and inside == cows.size())
+	check("the cows cannot push the player around (no physics body)", physical == 0)
+	check("every cow has idle(3)+walk(2) animations playing", wired == cows.size())
+	check("no cow frame is empty (the 2nd row only has 2)",
+		cows.size() > 0 and _empty_frame_count((cows[0].get_node("Sprite") as AnimatedSprite2D).sprite_frames) == 0)
+	check("the cow's feet sit on its origin (within 2px)", feet_ok == cows.size())
+	check("the cow is drawn bigger than the farmer (%dx%d px)"
+		% [_widest_frame_box((cows[0].get_node("Sprite") as AnimatedSprite2D).sprite_frames).size.x,
+			_widest_frame_box((cows[0].get_node("Sprite") as AnimatedSprite2D).sprite_frames).size.y],
+		wide == cows.size() and tall == cows.size())
+
+	await _test_cow_turns(cows)
+
+
+## 往左走要水平翻过来(图集里只有侧身、头朝右的一套)。
+## 把活动范围换成牛左下角一个 4x4 的小矩形,它就只能往左走 —— 然后看 flip_h。
+func _test_cow_turns(cows: Array[Node]) -> void:
+	if cows.is_empty():
+		return
+	var cow: Node2D = cows[0]
+	var sprite := cow.get_node("Sprite") as AnimatedSprite2D
+	var saved: Rect2 = cow.get("roam_area")
+	check("the cow starts facing the direction it is drawn in", sprite.flip_h == false)
+
+	var start_x := cow.position.x
+	cow.set("roam_area", Rect2(cow.position + Vector2(-40, -2), Vector2(4, 4)))
+	cow.set("_wait", 0.01)
+	var walked := false
+	for i in 180:
+		await get_tree().process_frame
+		if cow.position.x < start_x - 6.0:
+			walked = true
+			break
+	print("      牛: 向左走了 %.1f px(起点 %.1f -> %.1f),动画 '%s',flip_h=%s" % [
+		start_x - cow.position.x, start_x, cow.position.x, sprite.animation, sprite.flip_h])
+	check("a cow walked to the left of its pen when told to", walked)
+	check("the cow flips horizontally when walking left (flip_h=%s)" % sprite.flip_h,
+		sprite.flip_h and sprite.animation == "walk")
+
+	cow.set("roam_area", saved)
+	await _step_process(2)
+
+
+## 图集里全透明的帧有几张(走路那行只有 2 帧,放 3 帧就会多出一张空白的)
+func _empty_frame_count(frames: SpriteFrames) -> int:
+	var empty := 0
+	for anim_name in frames.get_animation_names():
+		for index in frames.get_frame_count(anim_name):
+			var image := _frame_image(frames.get_frame_texture(anim_name, index))
+			if image == null or _frame_bbox(image).size == Vector2i.ZERO:
+				empty += 1
+	return empty
+
+
+## 所有帧里最大的那个内容包围盒(用来看牛有没有比农夫大)
+func _widest_frame_box(frames: SpriteFrames) -> Rect2i:
+	var best := Rect2i(0, 0, 0, 0)
+	for anim_name in frames.get_animation_names():
+		for index in frames.get_frame_count(anim_name):
+			var image := _frame_image(frames.get_frame_texture(anim_name, index))
+			if image == null:
+				continue
+			var box := _frame_bbox(image)
+			if box.size.x > best.size.x:
+				best = box
+	return best
+
+
+## 等几个渲染帧(给靠 _process 走的动物用)
+func _step_process(frames: int) -> void:
+	for i in frames:
+		await get_tree().process_frame
 
 
 ## 斧 / 镐:规则层(直接调 FarmProps)+ 玩家那条真实链路(选工具 -> 按使用)。

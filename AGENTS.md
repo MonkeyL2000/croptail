@@ -30,7 +30,7 @@
 | `scripts/farm/` | 农田:`crop_data.gd`、`crop_db.gd`、`farm_cell.gd`(一格)、`farm_plot.gd`(网格+规则)、`target_indicator.gd`(面前那格的指示框) |
 | `scripts/player/` | 玩家本体 + 三个状态(idle/walk/use) |
 | `scripts/state_machine/` | 通用节点状态机(与游戏解耦) |
-| `scripts/world/` | 地图与地面物件:`farm_map.gd`(水墙)、`farm_props.gd`(撒道具/地标/斧镐规则)、`prop_db.gd`(道具表,47 条 rect)、`chicken.gd`、`dog.gd`(宠物狗,重走玩家的脚印跟随) |
+| `scripts/world/` | 地图与地面物件:`farm_map.gd`(水墙)、`farm_props.gd`(撒道具/地标/斧镐规则)、`prop_db.gd`(道具表,47 条 rect)、`chicken.gd`、`cow.gd`、`dog.gd`(宠物狗,重走玩家的脚印跟随) |
 | `scripts/ui/` | HUD(`hud.gd`)、图标表(`tool_icons.gd` / `item_icon.gd`) |
 | `main.tscn` 的节点顺序 | `FarmMap` → `Player` → `Dog` → `TargetIndicator`(指示框必须在最后 = 画在最上面),HUD 是 `CanvasLayer` 永远在最上 |
 | `scenes/dev/` | 开发工具场景:`selftest`(自检)、`screenshot`(出图)、`map_dump`(ASCII 地图)、`retile`(重算地形图块)、`grass_terrain_ref`(旧地图快照,当 peering 的标准答案) |
@@ -139,6 +139,10 @@
   白底直接引会在游戏里变成一块白方块,而且**不报错**、逻辑测试全绿 ——
   只有看画面才发现。处理完记得 `launch_editor` 一次再跑。参考 `tools/pack_dog.py`
   (宠物狗就是这么进来的,见 DECISIONS#dog-pet)。
+- **动物图集的行帧数可以不一样,别按规则网格切**:`Free Cow Sprites.png` 是
+  3 列 x 2 行、每格 32x32,但**第 2 行只有 2 帧**(第 3 格全透明)—— 按 3 帧播
+  走路会隔一会儿闪一下空白,而且**不报错**。切之前先逐格数 alpha,并且
+  自检里钉一条「每一帧都不空」(见 DECISIONS#cow-art)。
 - GDScript 缩进必须用 Tab。
 - `GameState`/`TimeManager` 的函数**不要写成 `static`**:它们是 autoload 实例,
   从实例调用 static 函数引擎会报错(踩过,见 DECISIONS)。

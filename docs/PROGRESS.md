@@ -25,13 +25,14 @@
 | autoload | `GameState`=`res://scripts/core/game_state.gd`,`TimeManager`=`res://scripts/core/time_manager.gd` |
 | 地图 | `res://scenes/world/farm_map.tscn`(1764 格草 + 3312 格水,72x46 格;草地层被 `tools/carve_ponds.py` 挖了 3 个池塘 = 174 格)。改完形状要重跑 `res://scenes/dev/retile.tscn`,否则新格子的图块是错的 |
 | 池塘 | 3 个椭圆(带 sin 抖动边),**水是露出来的**:删掉草地格就见到下面的水层,岸边不用过渡素材;塘口自动被水墙围上(见 `docs/DECISIONS.md#ponds`) |
-| 地标 | 围栏圈 + 鸡舍 + 2 只鸡,`farm_props.gd::_place_landmarks()` 手摆(`PEN_RECT`/`HOUSE_RECT`),手摆的格子在撒道具前就写进 `reserved` |
-| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~350 个随机道具 + 18 段围栏 + 1 鸡舍,碰撞从贴图 alpha 现算。表里 **47 条**:树 3 / 石头 6 / 木头(含树桩)7 / 花草灌木 26 / 围栏 4 / 鸡舍 1。斧/镐能敲掉它们(tree → +2 木,wood → +1 木,rock → +1 石)。**一条 rect = 一个精灵**,图集里挨着的邻居不许被圈进来(见 `docs/DECISIONS.md#prop-art-rects`) |
+| 地标 | 围栏圈 + 鸡舍 + 2 只鸡 + **牧场 + 2 头牛**,`farm_props.gd::_place_landmarks()` 手摆(`PEN_RECT`/`HOUSE_RECT`/`PASTURE_RECT`),手摆的格子在撒道具前就写进 `reserved`。两个圈都用 `_place_fence(rect)`(上下横排 + 右边一列柱子,**左边留口**) |
+| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~350 个随机道具 + 39 段围栏 + 1 鸡舍,碰撞从贴图 alpha 现算。表里 **47 条**:树 3 / 石头 6 / 木头(含树桩)7 / 花草灌木 26 / 围栏 4 / 鸡舍 1。斧/镐能敲掉它们(tree → +2 木,wood → +1 木,rock → +1 石)。**一条 rect = 一个精灵**,图集里挨着的邻居不许被圈进来(见 `docs/DECISIONS.md#prop-art-rects`) |
 | 工具 | 6 把:锄/水壶/种子/收获(作用在农田)+ 斧/镐(作用在地面物件)。斧/镐的名字是**像素推断**的,见 `docs/DECISIONS.md#gather-tools` 和 `docs/art/tools_objects.png` |
 | TileSet | `res://tilesets/test_tilemap.tres`(旧名沿用;水墙碰撞由 `farm_map.gd` 运行时生成) |
 | 玩家 | `res://scenes/characters/player.tscn`(32 个动画 = idle/walk x 4 朝向 + 6 把工具 x 4 朝向;由 `tools/gen_player_scene.py` 生成) |
 | 宠物 | 一只狗 `Dog`(`scripts/world/dog.gd`,挂在 `main.tscn` 的 `Player` 后面),跟在玩家屁股后面(每隔 6px 记一个脚印、重走脚印 —— 直线追会顶在树上)。素材是用户另外给的**外部素材**:白底原图 `game_source/Pets/lilpuddinpuggums.png` 经 `tools/pack_dog.py` 抠底+缩一半成 `pug_walk.png`(48x96 = 3x4 格 16x24) |
 | 宠物对照图 | `python tools/pack_dog.py`(顺带写 `docs/art/pug_sheet.png`:源图带格线 + 成品放大 8 倍 + 方向标注调色板) |
+| 牛 | 牧场里 2 头牛(`scripts/world/cow.gd`,`FarmMap/Props` 下),和鸡一样不走物理、只在注入的矩形里游荡(20px/s,停 1.5~5s)。图集是免费包自带的 `game_source/Characters/Free Cow Sprites.png`(**不是**外部素材):96x64 = 3 列 x 2 行、每格 32x32,**行 0 = 眨眼(3 帧)、行 1 = 走路(2 帧)**,第 2 行第 3 格是全透明的。牛是侧身头朝右,往左走 `flip_h` |
 | HUD | `res://scenes/ui/hud.tscn` + `scripts/ui/hud.gd`(字体由 `tools/gen_pixel_font.py` 生成):顶栏 + 左下工具条(6 格)+ 右下背包 + 材料格(木/石) |
 | 目标格指示框 | `scripts/farm/target_indicator.gd`(挂在 `main.tscn` 的 `TargetIndicator`,画在**所有东西之上**) |
 | 截图前的准备 | 截图工具默认把整块农田锄一遍(`till_plot`),好核对「土块有没有和格子对齐」 |
@@ -208,6 +209,26 @@
   - 顺手揪出一个**假失败**:`_test_ponds()` 内部有 60 帧推墙循环却没被 await,
     变成发射后不管的协程、和后面的测试**抢玩家位置**(见 `docs/DECISIONS.md#selftest-await`)。
   - **自检 231 → 260 项**。
+- [x] **2026-10-05 加牛 + 牧场**(用户说「应该还有其他素材,牛」):
+  - 牛用的就是免费包里自带的 `Characters/Free Cow Sprites.png`(工程里早就有、一直没人用),
+    **不靠外部/付费素材**,所以授权故事没变。
+  - 图集是 **3 列 x 2 行、每格 32x32**,但第 2 行第 3 格是全透明的 ——
+    两行帧数不一样(行 0 = 眨眼 3 帧、行 1 = 走路 2 帧)。哪行是哪个动作是逐像素量的:
+    行 0 的帧间差只有 4~12px 且全在眼睛和尾巴尖上,行 1 是 135px、从犄角到蹄子都在动。
+    当成规则网格放 3 帧 → 走路会闪空白,而且**不报错**;自检里钉了「每一帧都不空」。
+    详见 `docs/DECISIONS.md#cow-art`。
+  - 牛是**侧身、头朝右**的(眼睛/犄角在右、尾巴在左),往左走只能 `flip_h` —— 没有正/背面。
+  - `scripts/world/cow.gd` 和 `chicken.gd` 同一个路子:不走物理的 `Node2D`,在注入的
+    矩形里随机游荡(20px/s,停下来 1.5~5s),所以它**顶不动玩家**。
+    精灵原点落在**牛脚**上(`FEET_ROW = 29` → `offset = (0,-13)`,符号写反就钻地/浮空)。
+  - **牧场**:`PASTURE_RECT = (33,10,7,9)`,贴在鸡圈下面、农田右边。把鸡圈那套围栏代码
+    抽成 `_place_fence(rect)`(上下横排 + 右边一列柱子,左边留口),两个圈共用;
+    围栏 18 → 39 段。牛的活范围 = 圈内矩形再往里收 18px(`COW_ROAM_INSET`,鸡是 0),
+    不然牛头/牛屁股会画到围栏上。
+  - **自检 260 → 273 项**:新增 `-- pasture (cows)` 13 条(圈起来了 / 图集 96x64 /
+    2 头牛 / 每头都在活动范围内 / 没有碰撞体 / idle+walk 帧数对 / 没有空帧 /
+    脚在原点 2px 内 / 27x17 比农夫大 / 朝左走真会 flip_h)。
+    截图工具多打一行 `[cow] ...`,把每头牛的世界坐标 + 屏幕框打出来(牛会自己走)。
 
 ## Next(按顺序做)
 
@@ -231,9 +252,14 @@
    `FarmPlot` 已经有稳定的 `grid_pos` 键;`TimeManager.day_fraction()` 是派生值不用存。
 5. **背包格显示收获物数量**:`hud.gd::_build_backpack()` 里已经有 `harvested` 的数值,
    现在只画了种子数(右下角)。要同时显示就再加一个左下角的 Label。
-6. **还没用上的素材**:`Wood_Bridge.png`(过池塘的桥 —— 现在塘是实心的,要造桥就得
-   在塘上开一条通道并把水墙断开)、`Paths.png`(砌小径)、`Basic_Furniture.png`、
-   `Free Cow Sprites.png` + `Simple_Milk_and_grass_item.png`(牛奶产线)。
+6. **还没用上的素材**(全在 `game_source/`,都是免费包自带;审阅过但没进游戏):
+   `Wood_Bridge.png`(过池塘的桥 —— 现在塘是实心的,要造桥就得在塘上开一条通道
+   并把水墙断开)、`Paths.png`(砌小径)、`Basic_Furniture.png`、`Characters/Egg_And_Nest.png`
+   + `Objects/Egg_item.png` + `Objects/Simple_Milk_and_grass_item.png`(蛋/奶产线)、
+   `Objects/Chest.png`。
+   **另外装了完整付费包**(见下),里面有更多可用的东西:多色牛/小鸡、小牛、蛋和奶的图标、
+   水池、水井、招牌、果树挂果动画、建筑部件、官方点阵字体 —— 付费包许可更宽
+   (**允许商用**、仍要署名、不可再分发),要用的话得先把授权/署名写进 `ASSET_CREDITS.md`。
 7. **狗的后续**(可选):现在只会跟着走,不叫也不捡东西。要加「按 F 摸摸头 /
    它会去追鸡 / 存档里记住它」都是往 `dog.gd` 里加,不碰其他系统。
    另外它是**外部素材**,授权没确认前不要发 release(见下)。
@@ -270,12 +296,32 @@
   就把 `game_source/Pets/` 加进 `.gitignore`(游戏照常能跑,只是别人 clone 后没这只狗)。
   对照图:`docs/art/pug_sheet.png`(建议让用户顺便看一眼形状/方向对不对)。
 - 没有音频素材(原包里就没有)。
+- **下载目录里有完整付费包**`Downloads/croptails/CropTails/资产/Sprout Lands - Sprites - premium pack.zip`
+  (159 个文件;还有 UI 包 + 官方点阵字体 `pixelFont-7-8x14-sproutLands.ttf`)。
+  付费包的 `read_me.txt` 比免费包**宽松**:商用/非商用都允许、开源可用(要附署名 + 许可说明),
+  仍然不能把素材包本身再分发、禁止 NFT/AI 训练。要用里面的东西(多色牛、小牛、
+  蛋/奶图标、水池、水井、果树挂果动画、建筑部件……)就得先把它写进 `ASSET_CREDITS.md`,
+  并且**只把用到的那几张图**拷进 `game_source/`(不能整个包铺进仓库)。
 
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
-  → **`=== SELFTEST END: 260 checks, 0 failed ===`**,ERROR 区为空(只有一条已知无害的
-  `NodeFiniteStateMachine: 未知状态 'nonexistent'` 警告)。本轮新增的关键几条:
+  → **`=== SELFTEST END: 273 checks, 0 failed ===`**,ERROR 区为空(只有一条已知无害的
+  `NodeFiniteStateMachine: 未知状态 'nonexistent'` 警告)。本轮新增的 `-- pasture (cows)`:
+  - `the cow sheet is 96x64 (3 cols x 2 rows of 32x32)`
+  - `every cow has idle(3)+walk(2) animations playing`
+  - `no cow frame is empty (the 2nd row only has 2)` —— 防的就是「按规则网格切」那个不见血的错
+  - `the cow's feet sit on its origin (within 2px)`
+  - `the cow is drawn bigger than the farmer (27x17 px)`
+  - `the cows cannot push the player around (no physics body)`
+  - `a cow walked to the left ... the cow flips horizontally when walking left (flip_h=true)`
+  - 上一轮那些回归依然全绿:白底抠干净、狗 11~12px 高/舌头定正反/左右精确镜像/脚在原点(-1.0)、
+    绕墙、追上玩家(29→19px)、池塘落点 -221.0(差 0.0)。
+- 截图复核:`run_project {scene: "res://scenes/dev/screenshot.tscn"}` 无 ERROR。
+  本轮新增 `[cow]` 行(牛会自己走,所以得把它的实际位置打出来):
+  shot_1 里 `Cow_0 world=(588.3,225.6)`、`Cow_1 world=(584.6,224.3)`,活动范围
+  `(560,192) 44x76` —— 两头都在圈里;拿这些框去 `screenshots/shot_1.png` 里数牛的调色板像素,
+  预测的 32x32 框内 366 个(两头牛几乎重叠,第二头把第一头遮住了)。
   - `the white background is gone (frame corners are transparent)` —— 白底抠干净了
   - `the dog is scaled to farm size (11..12 px tall; the farmer is 16)`
   - `the front view shows the tongue, the back view does not (9 / 0)` —— 靠舌头色定正/反面
@@ -293,9 +339,9 @@
   正面/侧面有舌头而背面 0 个、左右帧 0 个像素不同。
 - `python tools/check_props.py` → **`0 problems, 0 warnings`**(47/47 干净)
 - 主场景 `run_project {projectPath: "D:\\godot_projects\\croptail"}`:仅
-  `[farm_props] 347 props (83 tree / 35 rock / 27 wood / 183 deco / 18 fence / 1 house) on 1587 open cells; 1587 collision boxes`
+  `[farm_props] 355 props (76 tree / 35 rock / 26 wood / 178 deco / 39 fence / 1 house) on 1524 open cells; 1649 collision boxes`
   + `[farm_map] water walls: 101 collision shapes`,**无 ERROR**
-  (道具数量/空地数和加狗之前**一模一样** —— 狗出生点周围那 3x3 格本来就在保留区里)
+  (围栏 18 → 39,树/石头/木头/花草相应少了一些 —— 牧场那 7x9 格从撒道具的池子里拿掉了)
 - 上一轮那些回归依然全绿(道具 `_test_prop_art()`、`every tree / wood variant found in the world can be chopped (10 of 10)`、
   `the soil sprite covers exactly its own cell`、`tilling repaints nothing outside that cell` 256/256、
   `the pond wall is flush with the water edge` 差 0.0px、`water wall is flush with the shore` 草沿 -264/玩家 -259)

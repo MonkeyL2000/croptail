@@ -63,7 +63,7 @@ or open `project.godot` in the editor and hit F5.
 | `scripts/farm/` | `FarmPlot`, `FarmCell`, `CropData`, `CropDB` |
 | `scripts/player/` | player body + idle / walk / use states |
 | `scripts/state_machine/` | generic node-based FSM, game-agnostic |
-| `scripts/world/` | map collision (`farm_map.gd`), ground props + landmarks + gather rules (`farm_props.gd`, `prop_db.gd`), chickens (`chicken.gd`), pet dog (`dog.gd`) |
+| `scripts/world/` | map collision (`farm_map.gd`), ground props + landmarks + gather rules (`farm_props.gd`, `prop_db.gd`), chickens (`chicken.gd`), cows (`cow.gd`), pet dog (`dog.gd`) |
 | `scripts/ui/` | HUD and the icon atlases (`hud.gd`, `tool_icons.gd`, `item_icon.gd`) |
 | `docs/` | `PROGRESS.md` (where it is) and `DECISIONS.md` (why) |
 | `docs/art/` | generated reference images (map render, sheet grids, action layout, labelled prop sheet) |
@@ -78,12 +78,13 @@ hand — it drives the real scenes and prints a summary:
 godot --path . res://scenes/dev/selftest.tscn
 ```
 
-It ends with `=== SELFTEST END: N checks, 0 failed ===` (260 checks at the time
+It ends with `=== SELFTEST END: N checks, 0 failed ===` (273 checks at the time
 of writing) and covers soil rules, the growth cycle, sprite atlas coordinates
-(incl. "a prop rect must hold exactly one sprite" and "the pet dog's white
-background is keyed out"), state transitions, movement, main-scene wiring, the
-water collision walls, the fence pen / chickens, axe & pickaxe rules, the ponds,
-and the dog following the player around a wall.
+(incl. "a prop rect must hold exactly one sprite", "the pet dog's white
+background is keyed out" and "no cow animation frame is empty"), state
+transitions, movement, main-scene wiring, the water collision walls, the fenced
+pen / chickens / cows, axe & pickaxe rules, the ponds, and the dog following the
+player around a wall.
 
 The prop table (`scripts/world/prop_db.gd`) also has an offline checker, because
 a rect that accidentally swallows a neighbouring sprite raises no error at all:
@@ -95,7 +96,10 @@ python tools/annotate_props.py     # -> docs/art/props_sheet.png (human review)
 
 ## Credits
 
-- Art — **Sprout Lands Basic Pack, by Cup Nooble** (required credit).
+- Art — **Sprout Lands Basic Pack, by Cup Nooble** (required credit). The cows
+  (`Characters/Free Cow Sprites.png`) come from this free pack, so they need no
+  extra licence work; the paid *premium* pack (which the project owner owns and
+  may use commercially with credit) is **not** part of this repo.
 - Pet dog sprite — supplied by the project owner (`game_source/Pets/`); **source
   and licence not confirmed yet**, so treat that folder as "do not publish"
   until it is. See `ASSET_CREDITS.md`.

@@ -49,6 +49,7 @@ func _ready() -> void:
 			await get_tree().process_frame
 		# 等画面稳下来再读:指示框在自己的 _process 里更新,刚传完坐标时读到的还是上一帧
 		_dump_indicator(main, player, i)
+		_dump_cows(main, i)
 		await _shoot("shot_%d" % (i + 1))
 	print("[screenshot] done -> res://screenshots/")
 
@@ -73,6 +74,32 @@ func _dump_indicator(main: Node, player: Player, spot: int) -> void:
 	print("[indicator] spot %d player=%s facing=%s cell=%s in_plot=%s visible=%s in_tree=%s processing=%s" % [
 		spot, player.global_position, player.facing, cell, plot.has_cell(cell),
 		box.visible, box.is_visible_in_tree(), box.is_processing()])
+
+
+## 牧场里每头牛画在哪:世界坐标 + 对应的屏幕矩形。
+## 牛会自己游荡,截图里它到底在画面的哪一块只能靠这行 —— 事后拿它去图上数像素,
+## 就能确认「牛真的画在牧场里面」而不是跑到围栏外边去了。
+func _dump_cows(main: Node, shot: int) -> void:
+	var props := main.get_node_or_null("FarmMap/Props")
+	if props == null or props.get_node_or_null("Props") == null:
+		return
+	var xform := get_viewport().get_canvas_transform()
+	for child in props.get_node("Props").get_children():
+		if not String(child.name).begins_with("Cow_"):
+			continue
+		var body := child as Node2D
+		var sprite := body.get_node_or_null("Sprite") as AnimatedSprite2D
+		if sprite == null:
+			continue
+		# 贴图是 32x32 的格子、居中画在 position + offset 上
+		var centre := body.global_position + sprite.offset
+		var top_left := xform * (centre + Vector2(-16, -16))
+		var bottom_right := xform * (centre + Vector2(16, 16))
+		print("[cow] shot %d %s world=(%.1f,%.1f) sprite_centre_screen=(%.1f,%.1f) box %s anim=%s flip=%s roam=%s" % [
+			shot, body.name, body.global_position.x, body.global_position.y,
+			xform.origin.x + centre.x, xform.origin.y + centre.y,
+			Rect2(top_left, bottom_right - top_left), sprite.animation, sprite.flip_h,
+			body.get("roam_area")])
 
 
 ## 把 HUD 各控件的实际矩形和字体度量打出来。
