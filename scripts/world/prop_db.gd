@@ -74,9 +74,16 @@ const PROPS := {
 	# (一条 rect 正好一个连通域,见 tools/check_props.py 第 4 项体检),
 	# 组合装饰原样画出来,也不再往木头那组里塞半块精灵。
 	"bush_wide": {"sheet": "biome", "rect": Rect2(0, 48, 32, 16), "kind": "deco", "solid": false},
-	"bush_wide_alt": {"sheet": "biome", "rect": Rect2(36, 64, 32, 16), "kind": "deco", "solid": false},
-	"bush_low": {"sheet": "biome", "rect": Rect2(2, 68, 30, 12), "kind": "deco", "solid": false},
-	"bush_leafy": {"sheet": "biome", "rect": Rect2(128, 64, 14, 10), "kind": "deco", "solid": false},
+	# 用户 2026-10-05 指出:这两张其实是**一棵平躺在地上的树**(左边那团绿=树冠、
+	# 右边那截木头=树根/树干,是一整块连通域,所以以前怎么切都不对)。
+	# 想立起来得把像素画旋转 90 度,像素画一转就糊 —— 用户说「不行就先不用它」,
+	# 于是登记成 kind `parked`:留在表里(离线体检仍然认得这张精灵),
+	# 但**不在 `SCATTER_KINDS` 里**,草地撒点永远不会撒到它。
+	"bush_wide_alt": {"sheet": "biome", "rect": Rect2(36, 64, 32, 16), "kind": "parked", "solid": false},
+	"bush_low": {"sheet": "biome", "rect": Rect2(2, 68, 30, 12), "kind": "parked", "solid": false},
+	# 荷叶(用户 2026-10-05 报号 #18):带一圈白边的圆叶子,形状和池塘里的
+	# 浮叶一模一样 —— 见下面 `pond` 那一段的说明。
+	"bush_leafy": {"sheet": "biome", "rect": Rect2(128, 64, 14, 10), "kind": "pond", "solid": false},
 	"shrub": {"sheet": "biome", "rect": Rect2(112, 68, 13, 9), "kind": "deco", "solid": false},
 	"sprig_b": {"sheet": "biome", "rect": Rect2(137, 74, 7, 5), "kind": "deco", "solid": false},
 	# 麦穗:一根高秆 + 顶上一颗金色的穗,底下是细叶(以前被当成「秋天的树」
@@ -86,7 +93,8 @@ const PROPS := {
 	# --- 荷叶:只浮在池塘水面上(kind `pond`)-------------------------------
 	#
 	# 形状是「带缺口的圆叶子」,本来当装饰撒在草地上 —— 用户看到就说
-	# 「荷叶放到草地上了,应该放在池塘里」(2026-10-05 确认就是这三张)。
+	# 「荷叶放到草地上了,应该放在池塘里」。`bush_leafy`(白边圆叶子)是用户
+	# 点名的那张(#18);下面三张 tuft 是用户先前确认过的另外三片小叶子。
 	# 所以给它们单独的 kind `pond`:
 	#   - **不在 `SCATTER_KINDS` 里** → 草地撒点不会再撒它们;
 	#   - `farm_props.gd::_place_pond_decor()` 只往**水面的格**上摆(塘内、离岸 ≥1 格);
@@ -97,10 +105,14 @@ const PROPS := {
 	"tuft_c": {"sheet": "biome", "rect": Rect2(102, 25, 8, 5), "kind": "pond", "solid": false},
 
 	# --- 花:全是粉色/黄色,不挡路 ---------------------------------------
-	"flower_big": {"sheet": "biome", "rect": Rect2(33, 33, 13, 14), "kind": "deco", "solid": false},
-	"flower_rose": {"sheet": "biome", "rect": Rect2(64, 49, 16, 14), "kind": "deco", "solid": false},
-	"flower_pink": {"sheet": "biome", "rect": Rect2(82, 2, 13, 13), "kind": "deco", "solid": false},
-	"flower_patch": {"sheet": "biome", "rect": Rect2(100, 4, 10, 11), "kind": "deco", "solid": false},
+	#
+	# 前四张是**一整颗圆滚滚的果实**(带绿叶/白籽,粉色系),不是花 ——
+	# 用户 2026-10-05 说「地上不应该有水果」,于是先登记成 `parked` 不撒了。
+	# 如果其实是你想要的花,报号给我,`kind` 改回 `deco` 就恢复。
+	"flower_big": {"sheet": "biome", "rect": Rect2(33, 33, 13, 14), "kind": "parked", "solid": false},
+	"flower_rose": {"sheet": "biome", "rect": Rect2(64, 49, 16, 14), "kind": "parked", "solid": false},
+	"flower_pink": {"sheet": "biome", "rect": Rect2(82, 2, 13, 13), "kind": "parked", "solid": false},
+	"flower_patch": {"sheet": "biome", "rect": Rect2(100, 4, 10, 11), "kind": "parked", "solid": false},
 	"flower_green": {"sheet": "biome", "rect": Rect2(83, 50, 11, 12), "kind": "deco", "solid": false},
 	"flower_pink_b": {"sheet": "biome", "rect": Rect2(114, 52, 11, 9), "kind": "deco", "solid": false},
 	"flower_pink_c": {"sheet": "biome", "rect": Rect2(99, 54, 9, 6), "kind": "deco", "solid": false},
@@ -135,7 +147,11 @@ const PROPS := {
 ## pond 也不在:荷叶浮在水面上,由 `_place_pond_decor()` 单独摆。
 const SCATTER_KINDS := ["tree", "rock", "wood", "deco"]
 ## 所有种类:统计输出要能列出围栏、鸡舍和荷叶
-const KINDS := ["tree", "rock", "wood", "deco", "pond", "fence", "house"]
+## `parked` = 「登记在表里、但不参与任何摆放」的精灵(平躺的树 / 果实)。
+## 它不出现在 `SCATTER_KINDS` 里,也不是池塘/地标用的 kind,所以草地撒点、
+## 池塘浮叶、围栏都不会碰它;列在 `KINDS` 里只是为了让运行日志里能看到
+## 「0 parked」这一项(体检时一眼知道它们是故意停用的)。
+const KINDS := ["tree", "rock", "wood", "deco", "pond", "parked", "fence", "house"]
 
 
 static func names_of_kind(wanted: String) -> Array[String]:

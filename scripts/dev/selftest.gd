@@ -738,6 +738,8 @@ func _test_main_scene() -> void:
 	check("props have rocks", main_props.count_kind("rock") > 0)
 	check("props have wood", main_props.count_kind("wood") > 0)
 	check("props have decor", main_props.count_kind("deco") > 0)
+	# kind `parked` = 「登记在表里但永远不摆」:平躺的树、圆滚滚的果实候选都挂这儿
+	check("parked props really stay off the map", main_props.count_kind("parked") == 0)
 	check("props avoid the farm plot", _props_avoid_plot(main_props, main_plot))
 	check("props keep clear of the spawn", _spawn_is_clear(main_props, main_player, 1))
 	check("solid props have collision shapes", _solid_props_are_blocking(main_props))
@@ -1170,7 +1172,8 @@ func _plot_cell_rect(main: Node2D, props: FarmProps) -> Rect2:
 	return Rect2(Vector2(origin), Vector2(farm_plot.columns, farm_plot.rows))
 
 
-## 小路:`Paths.png` 的横/竖条沿折线拼出来的贴花(`farm_path.gd`)。
+## 小路:`farm_path.gd` 把 `RUNS` 折线交给 `set_cells_terrain_connect()`,
+## 涂 TileSet 里的 `dirt` 地形(`TileMapLayer` + peering bit 自己接草边)。
 func _test_path(main: Node2D, props: FarmProps) -> void:
 	print("-- path")
 	var path := main.get_node_or_null("FarmMap/GameTilemap/Path")
@@ -1186,8 +1189,36 @@ func _test_path(main: Node2D, props: FarmProps) -> void:
 		tilemap.get_index() < farm_plot.get_index()
 		and farm_plot.get_index() < main.get_node("FarmMap/Props").get_index())
 	check("the path laid down some pieces (%d)" % path.piece_count(), path.piece_count() >= 4)
+	# 路是**地形**,不是贴花:涂的是 TileSet 里那一套一直没人用的 `dirt`(terrain 1)。
+	# 这里钉两件事:画出来的图块来自 Tilled_Dirt_Wide.png;画的格子 == 折线算出来的格子。
+	var dirt_source := -1
+	if path is TileMapLayer and path.tile_set != null:
+		for i in path.tile_set.get_source_count():
+			var source_id: int = path.tile_set.get_source_id(i)
+			var atlas := path.tile_set.get_source(source_id) as TileSetAtlasSource
+			if atlas != null \
+					and String(atlas.texture.resource_path).ends_with("Tilled_Dirt_Wide.png"):
+				dirt_source = source_id
+	check("the road paints the dirt tileset", dirt_source >= 0)
+	if dirt_source >= 0:
+		var wrong_source := 0
+		for cell in path.get_used_cells():
+			if path.get_cell_source_id(cell) != dirt_source:
+				wrong_source += 1
+		check("every road tile comes from the dirt tileset", wrong_source == 0)
 	var cells: Array = path.cells()
 	check("the path covers some cells (%d)" % cells.size(), cells.size() >= 20)
+	# 地形是引擎按 peering bit 自己接的,但「涂了哪些格」得和折线算出来的一致,
+	# 不然路上会多出一两块补丁(或者某段折线根本没画出来)。
+	var painted: Array = path.get_used_cells()
+	var cell_mismatch := 0
+	for cell in painted:
+		if not cells.has(cell):
+			cell_mismatch += 1
+	for cell in cells:
+		if not painted.has(cell):
+			cell_mismatch += 1
+	check("the road painted exactly its route cells (%d)" % painted.size(), cell_mismatch == 0)
 
 	# 路只能铺在草地上:某一段算错格子就会铺到水里,画面上是「一条路伸进池塘」
 	var off_grass: Array[String] = []
@@ -1665,6 +1696,17 @@ func _test_prop_art() -> void:
 			solid_pond += 1
 	check("no lily pad is solid", solid_pond == 0)
 	check("lily pads are not part of the land scatter", not PropDB.SCATTER_KINDS.has("pond"))
+	# 用户点名 `bush_leafy`(白边的圆叶子)是荷叶,但它得和那三张小叶子共用水面位置,
+	# 所以不是一个 kind 的事,而是「混着放、大的占多数」——这里把配比钉死。
+	check("parked props are registered but never scattered",
+		not PropDB.SCATTER_KINDS.has("parked") and not PropDB.names_of_kind("parked").is_empty())
+	var mixed_bad: Array[String] = []
+	for prop_name in FarmProps.POND_LEAF_MIX:
+		if not PropDB.names_of_kind("pond").has(prop_name):
+			mixed_bad.append(prop_name)
+	check("the lily-pad mix only names pond props", mixed_bad.is_empty())
+	check("the lily-pad mix keeps the big white-rimmed leaf in the majority",
+		FarmProps.POND_LEAF_MIX.count("bush_leafy") * 2 >= FarmProps.POND_LEAF_MIX.size())
 	var thin: Array[String] = []
 	for kind in PropDB.SCATTER_KINDS:
 		if PropDB.names_of_kind(kind).size() < 2:

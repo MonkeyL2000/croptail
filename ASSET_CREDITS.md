@@ -23,7 +23,7 @@ If you fork this repository, these terms travel with the `game_source/` folder.
 
 | Path | Contents |
 |---|---|
-| `Tilesets/` | Grass / Hills / Tilled_Dirt(_Wide)(_v2) 176x112 sheets, Water, Fences, Doors, house roof & walls |
+| `Tilesets/` | Grass / Hills / Tilled_Dirt(_Wide)(_v2) 176x112 sheets, Water, Fences, Doors, house roof & walls. **`Tilled_Dirt_Wide.png` also carries the `dirt` terrain** the road is painted with (see `docs/DECISIONS.md#farm-path`) |
 | `Tilesets/Bitmask references 1-2.png` | Terrain peering-bit reference sheets (not used at runtime) |
 | `Characters/Basic Charakter Spritesheet.png` | 192x192, 4x4 grid of 48x48 frames: idle (row A) + walk (row C) in 4 directions |
 | `Characters/Basic Charakter Actions.png` | 96x576 = 2 cols x 12 rows of 48x48. **2 columns = the two frames of one action; 12 rows = 3 actions x 4 directions** — see below |
@@ -31,7 +31,7 @@ If you fork this repository, these terms travel with the `game_source/` folder.
 | `Characters/Free Cow Sprites.png` | 96x64 = 3 cols x 2 rows of 32x32 — **row 0 = idle/blink (3 frames), row 1 = walk (2 frames), and the 3rd cell of row 1 is empty**. Side view, head to the right (`flip_h` to walk left). Used by `scripts/world/cow.gd` in the fenced pasture; see `docs/DECISIONS.md#cow-art` |
 | `Characters/Egg_And_Nest.png`, `Objects/Egg_item.png` | Animal produce (not wired up yet) |
 | `Objects/Basic_Plants.png` | 96x32, 6x2 cells of 16x16: crop growth stages (see `docs/DECISIONS.md`) |
-| `Objects/` (others) | Furniture, grass-biome decor, chest, chicken house, **paths** (used as the ground road decal — `scripts/world/farm_path.gd`, see `docs/DECISIONS.md#farm-path`), bridge, milk item |
+| `Objects/` (others) | Furniture, grass-biome decor, chest, chicken house, bridge, milk item, **`Paths.png`** (28 thin bars — the old hand-stitched road decal, now **unused**: the road is a `dirt` terrain tile instead, see `docs/DECISIONS.md#farm-path`) |
 | `Objects/Basic_tools_and_meterials.png` | 48x32 = 3x2 cells: rocks + logs, **and two unused hand-tool sprites** used here as axe / pickaxe (inferred names — see `docs/DECISIONS.md#gather-tools`) |
 | `Tilesets/Fences.png` | 64x64 = 4x4 cells: post + horizontal rails (rows 1/2 have the rails); used for the chicken pen **and the cow pasture** |
 | `Objects/Free_Chicken_House.png` | 48x48 = one 3x3-cell chicken coop |

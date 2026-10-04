@@ -49,8 +49,11 @@ const COW_ROAM_INSET := 18.0
 ## 每片池塘里浮几片荷叶。池塘水面本身就是走不进去的,荷叶纯粹好看,
 ## 所以不用很多 —— 但「每片池塘至少一片」自检会钉住(用户就是嫌荷叶长到草地上去了)。
 const POND_LEAVES := 5
-## 荷叶离岸边至少几格。叶子 8x5,贴边摆会画出水面盖到草地上,看着又像「长在岸上」。
+## 荷叶离岸边至少几格。叶子贴边摆会画出水面盖到草地上,看着又像「长在岸上」。
 const POND_LEAF_MARGIN := 1
+## 池塘浮叶的取用权重:用户点名的 `bush_leafy`(#18,带白边的圆叶子)是主荷叶,
+## 三张 tuft(各 30 像素的小叶子)当小浮叶 —— 在列表里出现几次就是几份权重。
+const POND_LEAF_MIX := ["bush_leafy", "bush_leafy", "bush_leafy", "tuft_a", "tuft_b", "tuft_c"]
 
 ## 鸡的脚本。不用 class_name:`preload` 就行,少一次「新 class_name 要跑一遍编辑器」
 const CHICKEN_SCRIPT := preload("res://scripts/world/chicken.gd")
@@ -164,7 +167,7 @@ func _generate() -> void:
 		for dx in range(-1, 2):
 			for dy in range(-1, 2):
 				reserved[center + Vector2i(dx, dy)] = true
-	# 小路上不长树:路是贴花,不会挡道具,不排掉的话就变成「树长在路中间」。
+	# 小路上不长树:路是地形(tile),自己不会挡道具 —— 不排掉的话就变成「树长在路中间」。
 	# 只排**草地**上的格子 —— 路的某一段万一压到水面(或者是农场图以外的格子),
 	# 本来也不在 candidates 里,这里不用管。
 	for cell in _path_cells():
@@ -307,16 +310,19 @@ func _place_named(prop_name: String, cell: Vector2i, size: Vector2i = Vector2i.Z
 	return _spawn(prop_name, cell, size, data["kind"])
 
 
-## 荷叶:浮在池塘**水面上**的装饰(`tuft_a/b/c`,kind `pond`)。
+## 荷叶:浮在池塘**水面上**的装饰(kind `pond`)。
 ##
 ## 以前它们是 `deco`,和灌木一起撒在草地上 —— 用户看到就说「荷叶放到草地上了,
 ## 应该放在池塘里」。现在只在这里摆,`SCATTER_KINDS` 里没有 `pond`,草地撒点碰不到。
+##
+## 取哪些精灵:用户点名 `bush_leafy`(#18,带白边的圆叶子)是**主荷叶**,
+## 三张 tuft 是小浮叶 —— 所以按 `POND_LEAF_MIX` 的权重挑(它出现三次)。
 ##
 ## 池塘格怎么算:草地层铺出来的是**一个矩形挖掉三个椭圆**,所以
 ## 「草格的包围盒内的非草格」就是水面(和自检 `_test_ponds` 用的是同一套算法)。
 ## 这些格本来就不在 `grass_cells` 里,撒点本来就不会碰它们。
 func _place_pond_decor() -> void:
-	var options := PropDB.names_of_kind("pond")
+	var options := _pond_leaf_options()
 	if options.is_empty():
 		return
 	for pond in _pond_cells():
@@ -351,6 +357,20 @@ func _place_leaf(prop_name: String, cell: Vector2i) -> void:
 	var node: Node2D = entry["node"]
 	var height: float = PropDB.get_prop(prop_name)["rect"].size.y
 	node.position.y -= int((CELL_SIZE - height) * 0.5)
+
+
+## 池塘里能用的叶子变体:优先用 `POND_LEAF_MIX`(主荷叶权重高),
+## 万一哪个名字被删了/改了 kind,退回「所有 kind == pond 的精灵」,
+## 这样摆叶子这件事永远不会因为改表而整个挂掉。
+func _pond_leaf_options() -> Array[String]:
+	var mix: Array[String] = []
+	for prop_name in POND_LEAF_MIX:
+		var data := PropDB.get_prop(prop_name)
+		if not data.is_empty() and data["kind"] == "pond":
+			mix.append(prop_name)
+	if not mix.is_empty():
+		return mix
+	return PropDB.names_of_kind("pond")
 
 
 ## 池塘水面格,按连通域分堆(四邻域) —— 三个池塘就是三堆。

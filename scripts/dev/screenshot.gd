@@ -110,8 +110,15 @@ func _dump_pond_leaves(main: Node, shot: int) -> void:
 	if props == null or props.get_node_or_null("Props") == null:
 		return
 	var xform := get_viewport().get_canvas_transform()
+	var pond_names := PropDB.names_of_kind("pond")
 	for child in props.get_node("Props").get_children():
-		if not String(child.name).begins_with("tuft_"):
+		# 节点名是 `<prop>_<x>_<y>`(x/y 可以是负数),所以按前缀认荷叶
+		var is_leaf := false
+		for prop_name in pond_names:
+			if String(child.name).begins_with(prop_name + "_"):
+				is_leaf = true
+				break
+		if not is_leaf:
 			continue
 		var node := child as Node2D
 		var sprite := node.get_node_or_null("Sprite") as Sprite2D

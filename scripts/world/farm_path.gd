@@ -1,42 +1,45 @@
-extends Node2D
+extends TileMapLayer
 
-## 农场小路:用 `Objects/Paths.png` 里的横条/竖条拼出来的土黄色小径。
+## 农场小路:把 `Tilesets/Tilled_Dirt_Wide.png` 那张图里的 **dirt 地形**
+## (`tile_set` 里 terrain_set 0 / terrain 1)沿一条折线铺成一格一格的地面。
 ##
-## ## 为什么不建 TileMapLayer
+## ## 为什么改掉原来的「贴花」写法(2026-10-05)
 ##
-## 那张图里的路**不是按 16x16 格子画的**:横条 3 像素高、宽度有 5/8/9/10/11 五种,
-## 竖条 3 像素宽、长度 5~11;它们在图集里的位置也不是格子对齐的(全部 28 块见
-## `python tools/sprite_inventory.py paths`)。硬按格子切,一条路会变成一串
-## 互不相连的碎片。
+## 第一版是用 `Objects/Paths.png` 里 3 像素宽的土黄细条沿折线首尾拼出来的贴花:
+## 几何上没错(自检也过),但画面上就是**一条细线**,不像「一条路」。
+## 用户一眼就看出不对:「小路生成有问题,它应该也有 tile」。
 ##
-## 所以这里当**贴花**用:每条路是一段折线,沿折线把横条(竖条)首尾接起来 ——
-## 接口处让最后一块**贴住终点**,和前一块重叠几个像素。同一颜色、同样高度的
-## 细条,重叠看不出来,而留缝一眼就是断的。
+## 确实 —— 项目里的 TileSet(`tilesets/test_tilemap.tres`)本来就带着
+## `terrain_1 = "dirt"`(dirt 地形,外加一圈带草边的过渡块,由 Tilled_Dirt_Wide.png
+## 提供),只是一直没人用。改成 TileMapLayer 之后:
+##   - 路是**一格一块 tile**,和草地、水面一样是地形,不再是飘在上面的贴花;
+##   - 拐角、端口、草边交给 TileSet 自己接(`set_cells_terrain_connect`),
+##     不用手算像素、不会漏缝;
+##   - 可以直接在编辑器里用 terrain 笔刷接着画。
 ##
 ## ## 和别的东西的关系
 ##
-## - 画在**草皮之上、农田和道具之下**:`farm_map.tscn` 里的顺序就是
-##   `GameTilemap(water -> grass -> Nature -> Path) -> FarmPlot -> Props`。
+## - 画在**草皮之上、农田和道具之下**:`farm_map.tscn` 里的顺序是
+##   `water -> grass -> Nature -> Path`,然后才是 `FarmPlot` 和 `Props`。
 ## - 路占的格子会**从撒树的候选里排除**(`FarmProps` 建图前问 `cells()`),
 ##   不然树会长在路中间。
-## - 不生成任何碰撞体:路是地上的花纹,不该挡人,也不该挡道具。
-## - **不动地形**:路只是画上去的贴花,水塘、草坪那一套完全没变
-##   (所以也不需要在改完之后重跑 retile)。
+## - 不生成碰撞体:路是地面,不该挡人,也不该挡道具。
+## - **不动地形**:草地层一个字节都没改,小路的格子仍然算「草地」
+##   (所以也不需要重跑 retile)。
 
+## TileMapLayer 的格和本项目的「道具格」是同一套坐标:layer 不设 position 偏移,
+## 格 (cx,cy) 就画在 (cx*16, cy*16),和 `FarmProps` 的换算对得上(见 #cell-offsets)。
 const CELL := 16
-const SHEET := "res://game_source/Objects/Paths.png"
-## 图集里最长的那根横条(11x3)和竖条(3x11):长一点接缝少一点。
-const PIECE_H := Rect2(3, 20, 11, 3)
-const PIECE_V := Rect2(36, 50, 3, 11)
-## 每一段的两头各往外多画几个像素:拐角处两条的端头互相补上,不留缺口。
-## 4 像素只有四分之一格,不会戳到隔壁格上去。
-const EXTEND := 4.0
+## TileSet 里的地形编号:见 `tilesets/test_tilemap.tres` 的
+## `terrain_set_0/terrain_1/name = "dirt"`。
+const TERRAIN_SET := 0
+const DIRT_TERRAIN := 1
 
 ## 路线:每一项是一段(起点格, 终点格),只能是横的或竖的。
 ##
 ## 特意走「农田南边那条街」(第 15 行):玩家出生点就在 (25,15),一出场脚底下
 ## 就是路;往东到牧场西边留的那个口(进牧场),往西拐一下到池塘边,
-## 中间往北岔一条进鸡圈。格子坐标和 `FarmProps` 是同一套(见 #cell-offsets)。
+## 中间往北岔一条进鸡圈。格子坐标和 `FarmProps` 是同一套。
 const RUNS := [
 	{"from": Vector2i(4, 15), "to": Vector2i(32, 15)},
 	{"from": Vector2i(4, 15), "to": Vector2i(4, 12)},
@@ -47,7 +50,6 @@ const RUNS := [
 ]
 
 var _cells := {}
-var _sheets := {}
 
 
 func _ready() -> void:
@@ -59,74 +61,40 @@ func cells() -> Array:
 	return _cells.keys()
 
 
-## 路一共铺了多少块料(自检用:能发现「一段路一块都没铺」)。
+## 路一共铺了多少块 tile(自检用:能发现「一段路一块都没铺」)。
 func piece_count() -> int:
-	return get_child_count()
+	return get_used_cells().size()
 
 
 func _build() -> void:
+	var route := _route_cells()
+	if route.is_empty():
+		return
+	for cell in route:
+		_cells[cell] = true
+	set_cells_terrain_connect(route, TERRAIN_SET, DIRT_TERRAIN)
+
+
+## 折线 -> 格子列表(去重)。铺 tile 和 `cells()` 用的是同一份数据。
+func _route_cells() -> Array[Vector2i]:
+	var seen := {}
+	var out: Array[Vector2i] = []
 	for run in RUNS:
 		var a: Vector2i = run["from"]
 		var b: Vector2i = run["to"]
 		if a.y == b.y:
-			_run_h(mini(a.x, b.x), maxi(a.x, b.x), a.y)
+			for cx in range(mini(a.x, b.x), maxi(a.x, b.x) + 1):
+				_append_cell(out, seen, Vector2i(cx, a.y))
 		elif a.x == b.x:
-			_run_v(a.x, mini(a.y, b.y), maxi(a.y, b.y))
+			for cy in range(mini(a.y, b.y), maxi(a.y, b.y) + 1):
+				_append_cell(out, seen, Vector2i(a.x, cy))
 		else:
 			push_error("FarmPath: 这一段既不是横的也不是竖的: %s -> %s" % [a, b])
+	return out
 
 
-## 横着的一段:从格 x0 的中心画到格 x1 的中心。
-func _run_h(x0: int, x1: int, y: int) -> void:
-	var start := x0 * CELL + CELL * 0.5 - EXTEND
-	var end := x1 * CELL + CELL * 0.5 + EXTEND
-	var top := y * CELL + _center_inset(PIECE_H.size.y)
-	var x := start
-	while x + PIECE_H.size.x <= end:
-		_add_piece(PIECE_H, Vector2(x, top))
-		x += PIECE_H.size.x
-	if x < end:
-		_add_piece(PIECE_H, Vector2(end - PIECE_H.size.x, top))
-	for cx in range(x0, x1 + 1):
-		_cells[Vector2i(cx, y)] = true
-
-
-## 竖着的一段:从格 y0 的中心画到格 y1 的中心。
-func _run_v(x: int, y0: int, y1: int) -> void:
-	var start := y0 * CELL + CELL * 0.5 - EXTEND
-	var end := y1 * CELL + CELL * 0.5 + EXTEND
-	var left := x * CELL + _center_inset(PIECE_V.size.x)
-	var y := start
-	while y + PIECE_V.size.y <= end:
-		_add_piece(PIECE_V, Vector2(left, y))
-		y += PIECE_V.size.y
-	if y < end:
-		_add_piece(PIECE_V, Vector2(left, end - PIECE_V.size.y))
-	for cy in range(y0, y1 + 1):
-		_cells[Vector2i(x, cy)] = true
-
-
-## 3 像素宽的条要摆在格子正中:16-3=13,一半是 6.5 —— 取整到 7,
-## 这样它盖住格子的第 7/8/9 行,四舍五入之后依然是正中对齐的,
-## 而且坐标是整数(小数坐标会让像素画糊掉)。
-func _center_inset(piece: float) -> int:
-	return int((CELL - piece) * 0.5 + 0.5)
-
-
-func _add_piece(region: Rect2, at: Vector2) -> void:
-	var sprite := Sprite2D.new()
-	sprite.centered = false
-	sprite.texture = _piece_texture(region)
-	sprite.position = at
-	add_child(sprite)
-
-
-func _piece_texture(region: Rect2) -> AtlasTexture:
-	if not _sheets.has("path"):
-		_sheets["path"] = load(SHEET) as Texture2D
-	if not _sheets.has(region):
-		var atlas := AtlasTexture.new()
-		atlas.atlas = _sheets["path"]
-		atlas.region = region
-		_sheets[region] = atlas
-	return _sheets[region]
+func _append_cell(out: Array[Vector2i], seen: Dictionary, cell: Vector2i) -> void:
+	if seen.has(cell):
+		return
+	seen[cell] = true
+	out.append(cell)

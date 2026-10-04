@@ -33,7 +33,7 @@
 | `scripts/farm/` | 农田:`crop_data.gd`、`crop_db.gd`、`farm_cell.gd`(一格)、`farm_plot.gd`(网格+规则)、`target_indicator.gd`(面前那格的指示框) |
 | `scripts/player/` | 玩家本体 + 三个状态(idle/walk/use) |
 | `scripts/state_machine/` | 通用节点状态机(与游戏解耦) |
-| `scripts/world/` | 地图与地面物件:`farm_map.gd`(水墙)、`farm_props.gd`(撒道具/地标/斧镐规则)、`farm_path.gd`(小路贴花)、`prop_db.gd`(道具表,45 条 rect:树 3 / 石 6 / 木 5 / 荷叶 3 / 花草灌木 23 / 围栏 4 / 鸡舍 1)、`chicken.gd`、`cow.gd`、`dog.gd`(宠物狗,重走玩家的脚印跟随) |
+| `scripts/world/` | 地图与地面物件:`farm_map.gd`(水墙)、`farm_props.gd`(撒道具/地标/斧镐规则)、`farm_path.gd`(**小路 = `TileMapLayer` + TileSet 里那套 `dirt` 地形**)、`prop_db.gd`(道具表,45 条 rect:树 3 / 石 6 / 木 5 / 荷叶 4 / 花草灌木 16 / **停用 6** / 围栏 4 / 鸡舍 1)、`chicken.gd`、`cow.gd`、`dog.gd`(宠物狗,重走玩家的脚印跟随) |
 | `scripts/ui/` | HUD(`hud.gd`)、图标表(`tool_icons.gd` / `item_icon.gd`) |
 | `main.tscn` 的节点顺序 | `FarmMap` → `Player` → `Dog` → `TargetIndicator`(指示框必须在最后 = 画在最上面),HUD 是 `CanvasLayer` 永远在最上 |
 | `scenes/dev/` | 开发工具场景:`selftest`(自检)、`screenshot`(出图)、`map_dump`(ASCII 地图)、`retile`(重算地形图块)、`grass_terrain_ref`(旧地图快照,当 peering 的标准答案) |
@@ -59,7 +59,7 @@
 | `ascii_sheet.py` | 把图集/单条 rect 打成**字符画**(一个像素一个字母、按颜色家族上色)—— 助手看不到图,只能靠这个分 «树 / 倒木»「荷叶 / 灌木」这种靠形状的差别 |
 | `annotate_props.py` | 把 `prop_db.gd` 里每条 rect 描边 + 编号画到两个道具图集上(`docs/art/props_sheet.png`) —— 「素材放错了」的对照图,人工核对用 |
 | `zoom_props.py` | 把指定的几条(或 `--all` 全部 45 条)道具 8 倍放大拼成一张图,左上角印**全局大编号**(`python tools/zoom_props.py --all --out docs/art/props_numbered.png`)—— 拿去问用户「你说的是哪一号」时用;编号在任何一张放大图上都一致。`--list` 列全部名字 |
-| `check_leaf_shots.py` | 拿截图数像素,验证**荷叶真画在水面上**(`python tools/check_leaf_shots.py <leaf.log>`,`[leaf]` 行由 `scenes/dev/screenshot.tscn` 打印)。它会把 HUD 面板减掉(见下面那条) |
+| `check_leaf_shots.py` | 拿截图数像素,验证**荷叶真画在水面上**(`python tools/check_leaf_shots.py <leaf.log>`,`[leaf]` 行由 `scenes/dev/screenshot.tscn` 打印)。荷叶有 4 种尺寸,调色板和 rect 都**按名字从 `prop_db.gd` 现查**;它会把 HUD 面板减掉(见下面那条) |
 | `carve_ponds.py` | 按椭圆删草地格、挖出池塘(`--dry-run` 可看效果)。改完**必须**跑 `retile.tscn` + `retile_grass.py` |
 | `render_map.py` | 离线把 `farm_map.tscn` 的地形层合成成一张整图(`docs/art/map.png`)。**看草坪对不对看这张**,不要在游戏里对着一小块猜 |
 | `extract_props.py` | 连通域分析道具图集(只是**建议**,权威表在 `prop_db.gd`)。⚠️ 它的 rect 会把**挨着摆的两块精灵粘成一块**,只能当参考 —— 见 DECISIONS#prop-art-rects |
@@ -134,19 +134,31 @@
   **kind 由颜色家族决定,不由形状**:粉 ⇒ 花 ⇒ `deco`(永远不许 solid)、灰 ⇒ 石、
   木色 ⇒ `wood`、绿 ⇒ 草/灌木。引擎侧也有回归断言(`selftest.gd::_test_prop_art()`),
   见 DECISIONS#prop-art-rects。
-- **小路是贴花,不是 TileMap**:`Paths.png` 里的条子不是 16 的倍数、只有 3 像素宽,
-  按格子切会碎;`farm_path.gd` 沿折线把条子接起来,路占的格子写进
-  `FarmProps` 的 `reserved`(不然树会长在路中间)。不生成碰撞体、不动地形。
-  改路线只改 `RUNS`,自检 `_test_path()` 会验「每格都是草 / 连通成一条 / 路在出生点上」。
-  见 DECISIONS#farm-path。
+- **小路是「地形」,不是贴花**:`GameTilemap/Path` 是一个 `TileMapLayer`,铺的是
+  TileSet 里一直没人用的 **`dirt` 地形**(`terrain_set 0 / terrain 1`,图集
+  `Tilled_Dirt_Wide.png`)—— 用 `set_cells_terrain_connect()`,**绝不手填图块坐标**。
+  边缘的草边由 peering bit 自动接(所以路看起来是「中间一条土、上下各 3px 草」)。
+  `Paths.png` 那套 3px 条子贴花已**废弃不用**。
+  这一层**没有 position 偏移**(和 `FarmProps` 同一套格坐标);路占的格子由
+  `FarmProps._path_cells()` 预留,不然树会长在路中间。改路线只改 `RUNS`,
+  自检 `_test_path()` 会验「每格都是草 / 连通成一条 / 路在出生点上 /
+  **每块图都来自 dirt 图集** / 涂的格子 == 折线算出的格子」。见 DECISIONS#farm-path。
+- **`kind "parked"` = 「登记在表里,但永远不摆」**:平躺的树(`#19 bush_low` /
+  `#21 bush_wide_alt`,要 90° 转像素才像样,用户说「不行就先不用它」)和
+  4 个「看着像果实」的圆球花都挂在这个 kind 上。它不在 `SCATTER_KINDS`、
+  不是 `pond`、也不是地标 → 三条摆放路径全绕开它,但仍在 `KINDS` 里,
+  所以运行日志会打 `0 parked`(变多就是有东西漏进了摆放路径)。见 DECISIONS#parked-kind。
 - **拿不定「这格素材是什么」时,别接着推**:`tools/annotate_sheet.py` /
   `annotate_objects.py` / `annotate_props.py` / `annotate_terrain.py` 会把格子坐标和
   代码认定的名字画到图上,让用户看一眼就能回答。斧/镐的名字就是这么来的
   (推断值,见 DECISIONS#gather-tools);不报错但画错的 bug 都靠这个抓。
 - **荷叶(kind `pond`)只浮在池塘水面上,不许回到草地撒点里**:`prop_db.gd` 里它
   不在 `SCATTER_KINDS`,只由 `farm_props.gd::_place_pond_decor()` 摆
-  (离岸 ≥1 格、两片不挨着、居中在格心上)。要验它:引擎内 10 条 + 截图数像素
-  (`tools/check_leaf_shots.py`)。见 DECISIONS#pond-lily-pads。
+  (离岸 ≥1 格、两片不挨着、居中在格心上)。用户认出 `bush_leafy`(白边的圆叶子)
+  也是荷叶,但它和三张小叶子尺寸不同,所以用 `POND_LEAF_MIX` **混着放**、
+  `bush_leafy` 占多数(不然「荷叶又跑回草地」的 bug 会复活)。
+  要验它:引擎内 13 条 + 截图数像素(`tools/check_leaf_shots.py`)。
+  见 DECISIONS#pond-lily-pads。
 - **截图查像素时先把 HUD 减掉**:HUD 是 `CanvasLayer`,永远画在世界之上。
   同一个屏幕矩形,一片荷叶在 shot_1 里数出 30 个叶子像素、在 shot_3 里数出 0 ——
   因为它正好压在底部消息栏 `(112,310,416,20)` 底下。**看不见不等于没画**。

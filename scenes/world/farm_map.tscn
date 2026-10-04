@@ -25,7 +25,8 @@ position = Vector2(-11, 17)
 tile_map_data = PackedByteArray("AAASAAUABAAGAAAAAAAKAAYABAAGAAIAAAAYAAYABAAGAAEAAAAUAAcABAAGAAAAAAAdAAcABAADAAAAAAAJAAsABAAGAAIAAAAbAAwABAAGAAIAAAAeAAwABAAAAAAAAAAVAA0ABAADAAAAAAAZAA0ABAAFAAEAAAA=")
 tile_set = ExtResource("1_py6nr")
 
-[node name="Path" type="Node2D" parent="GameTilemap"]
+[node name="Path" type="TileMapLayer" parent="GameTilemap"]
+tile_set = ExtResource("1_py6nr")
 script = ExtResource("5_path")
 
 [node name="FarmPlot" type="Node2D" parent="."]

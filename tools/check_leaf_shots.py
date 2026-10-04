@@ -8,6 +8,10 @@
     python tools/check_leaf_shots.py C:/ct_out/leaf.log
 其中 leaf.log 是 `scenes/dev/screenshot.tscn` 打印的 `[leaf]` 行
 (每片荷叶一行,带屏幕矩形)。
+
+荷叶现在有 4 个变体(`bush_leafy` 是用户点名的那张白边大叶子 + 三张小叶子),
+大小不一样,所以调色板**按名字从 `prop_db.gd` 里查出 rect 再取**,
+不写死尺寸:日志里的名字是 `<prop>_<x>_<y>`,取最长匹配的那条。
 """
 import collections
 import os
@@ -17,25 +21,44 @@ import sys
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SHEET = os.path.join(ROOT, "game_source/Objects/Basic_Grass_Biom_things.png")
-SHOTS = os.path.join(ROOT, "screenshots")
-# 荷叶三张的调色板直接从图集上取,不手抄
-TUFTS = [(97, 18, 8, 5), (84, 23, 8, 5), (102, 25, 8, 5)]
+SHEETS = {
+    "biome": os.path.join(ROOT, "game_source/Objects/Basic_Grass_Biom_things.png"),
+    "materials": os.path.join(ROOT, "game_source/Objects/Basic_tools_and_meterials.png"),
+    "fence": os.path.join(ROOT, "game_source/Tilesets/Fences.png"),
+    "house": os.path.join(ROOT, "game_source/Objects/Free_Chicken_House.png"),
+}
 WATER = {(155, 212, 195), (177, 224, 190)}
+## 水面格满打满算是 256 像素:叶子本身、水面色阶、岸边阴影都会占掉一些,
+## 所以水色只要「明显占多数」就算对(叶子长在草地上时这里会接近 0)。
+WATER_MIN = 100
 # HUD 五块面板的几何(docs 里写死的那套):压在面板底下的东西本来就看不见
 HUD = [(0, 0, 640, 22), (112, 310, 416, 20), (0, 330, 166, 30),
        (524, 330, 54, 30), (582, 330, 54, 30)]
 LINE = re.compile(r"\[leaf\] shot (\d+) (\S+) world \[P: \((-?\d+), (-?\d+)\)[^\]]*\]"
                   r" screen \[P: \((-?\d+), (-?\d+)\)")
+PROP = re.compile(r'"(\w+)":\s*\{"sheet":\s*"(\w+)",\s*"rect":\s*Rect2\((\d+), (\d+), (\d+), (\d+)\)')
 
 
-def palette(image):
-    out = set()
-    for x, y, w, h in TUFTS:
-        for px in image.crop((x, y, x + w, y + h)).getdata():
-            if px[3] > 200:
-                out.add(px[:3])
+def props():
+    """prop_db.gd 里登记的精灵名字 -> (sheet, rect)。"""
+    text = open(os.path.join(ROOT, "scripts/world/prop_db.gd"), encoding="utf-8").read()
+    out = {}
+    for name, sheet, x, y, w, h in PROP.findall(text):
+        out[name] = (sheet, (int(x), int(y), int(w), int(h)))
     return out
+
+
+def lookup(name, table):
+    """日志里的 `<prop>_<x>_<y>` -> (prop 名, sheet, rect)。名字取最长匹配。"""
+    best = None
+    for prop_name in table:
+        if name == prop_name or name.startswith(prop_name + "_"):
+            if best is None or len(prop_name) > len(best):
+                best = prop_name
+    if best is None:
+        return None
+    sheet, rect = table[best]
+    return best, sheet, rect
 
 
 def in_hud(x, y, w, h):
@@ -49,36 +72,65 @@ def main(argv):
     if not argv:
         print(__doc__)
         return 1
-    colors = palette(Image.open(SHEET).convert("RGBA"))
+    table = props()
+    sheets = {}
+
+    def sheet_image(sheet_name):
+        if sheet_name not in sheets:
+            sheets[sheet_name] = Image.open(SHEETS[sheet_name]).convert("RGBA")
+        return sheets[sheet_name]
+
+    def sprite(name):
+        """(调色板, 不透明像素数, 宽, 高)"""
+        found = lookup(name, table)
+        if found is None:
+            return None
+        _, sheet_name, rect = found
+        image = sheet_image(sheet_name).crop(
+            (rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]))
+        colors, opaque = set(), 0
+        for px in image.getdata():
+            if px[3] > 200:
+                colors.add(px[:3])
+                opaque += 1
+        return colors, opaque, rect[2], rect[3]
+
     leaves = collections.defaultdict(list)
     for line in open(argv[0], encoding="utf-8", errors="replace"):
         found = LINE.search(line)
         if found:
             leaves[int(found.group(1))].append(
                 (found.group(2), int(found.group(5)), int(found.group(6))))
-    drawn = hidden = off = bad = 0
+    visible = hidden = off = bad = unknown = 0
     for shot in sorted(leaves):
-        image = Image.open(os.path.join(SHOTS, "shot_%d.png" % (shot + 1))).convert("RGB")
+        image = Image.open(os.path.join(ROOT, "screenshots/shot_%d.png" % (shot + 1))).convert("RGB")
         for name, sx, sy in leaves[shot]:
-            if not (0 <= sx and sx + 8 <= image.width and 0 <= sy and sy + 5 <= image.height):
+            art = sprite(name)
+            if art is None:
+                print("   %-20s <-- not in prop_db.gd" % name)
+                unknown += 1
+                continue
+            colors, opaque, w, h = art
+            if not (0 <= sx and sx + w <= image.width and 0 <= sy and sy + h <= image.height):
                 off += 1
                 continue
-            if in_hud(sx, sy, 8, 5):
+            if in_hud(sx, sy, w, h):
                 hidden += 1
                 continue
-            hit = sum(1 for px in image.crop((sx, sy, sx + 8, sy + 5)).getdata()
-                      if px in colors)
-            cell = image.crop((sx - 4, sy - 6, sx + 12, sy + 10))
+            hit = sum(1 for px in image.crop((sx, sy, sx + w, sy + h)).getdata() if px in colors)
+            cx, cy = sx + w // 2, sy + h // 2
+            cell = image.crop((cx - 8, cy - 8, cx + 8, cy + 8))
             water = sum(1 for px in cell.getdata() if px in WATER)
-            okay = hit >= 25 and water >= 150
+            okay = hit >= max(8, opaque // 2) and water >= WATER_MIN
             if not okay:
                 bad += 1
-            print("   shot_%d %-18s (%3d,%3d) leaf px %2d/40  16x16 water %3d/256 %s"
-                  % (shot + 1, name, sx, sy, hit, water, "" if okay else "<-- problem"))
-            drawn += 1
-    print("== visible lily pads %d: drawn %d, behind the HUD %d, off screen %d, bad %d"
-          % (drawn + hidden + off, drawn, hidden, off, bad))
-    return 1 if bad else 0
+            print("   shot_%d %-20s (%3d,%3d) %2dx%-2d leaf px %3d/%-3d water %3d/256 %s"
+                  % (shot + 1, name, sx, sy, w, h, hit, opaque, water,
+                     "" if okay else "<-- problem"))
+            visible += 1
+    print("== lily pads %d: drawn %d, behind the HUD %d, off screen %d, unknown %d, bad %d"
+          % (visible + hidden + off + unknown, visible, hidden, off, unknown, bad))
+    return 1 if bad or unknown else 0
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@
 | **道具对照图** | `python tools/annotate_props.py` → `docs/art/props_sheet.png`(`prop_db.gd` 里每条 rect 描边 + 编号 + 名字/kind/占地;怀疑「素材放错了」时看这张) |
 | 道具表体检 | `python tools/check_props.py`(每条 rect 是不是**正好一个连通域(+1px 容差)**、kind 和调色板对不对、一条精灵不被两条 rect 切,退出码 0 = 全过) |
 | 道具放大镜 | `python tools/zoom_props.py <名字...>` → 指定的几条道具 8 倍放大 + **全局编号**(`--all` 就是 45 条全上,→ `docs/art/props_numbered.png`,拿去问用户用) |
-| 荷叶截图体检 | `python tools/check_leaf_shots.py <leaf.log>` —— 对着截图数像素,证明荷叶真的画在**水面上**(`[leaf]` 行由 `scenes/dev/screenshot.tscn` 打印) |
+| 荷叶截图体检 | `python tools/check_leaf_shots.py <leaf.log>` —— 对着截图数像素,证明荷叶真的画在**水面上**(`[leaf]` 行由 `scenes/dev/screenshot.tscn` 打印;荷叶 4 种尺寸不同,rect/调色板**按名字从 `prop_db.gd` 现查**) |
 | 连通域清单 | `python tools/sprite_inventory.py <sheet>`(每块精灵的包围盒/像素数/颜色家族/ASCII 缩略图;`--rects` 标出没被任何 rect 盖住的) |
 | 动作版式图 | `python tools/annotate_actions.py` → `docs/art/actions_groups.png`(3 个动作组 x 4 个朝向,人工核对用) |
 | 地形图块重算 | `res://scenes/dev/retile.tscn`(改了地图形状后要跑;先自校验参考图) |
@@ -29,8 +29,9 @@
 | 地图 | `res://scenes/world/farm_map.tscn`(1764 格草 + 3312 格水,72x46 格;草地层被 `tools/carve_ponds.py` 挖了 3 个池塘 = 174 格)。改完形状要重跑 `res://scenes/dev/retile.tscn`,否则新格子的图块是错的 |
 | 池塘 | 3 个椭圆(带 sin 抖动边),**水是露出来的**:删掉草地格就见到下面的水层,岸边不用过渡素材;塘口自动被水墙围上(见 `docs/DECISIONS.md#ponds`) |
 | 地标 | 围栏圈 + 鸡舍 + 2 只鸡 + **牧场 + 2 头牛**,`farm_props.gd::_place_landmarks()` 手摆(`PEN_RECT`/`HOUSE_RECT`/`PASTURE_RECT`),手摆的格子在撒道具前就写进 `reserved`。两个圈都用 `_place_fence(rect)`(上下横排 + 右边一列柱子,**左边留口**) |
-| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~340 个随机道具 + 39 段围栏 + 1 鸡舍 + 15 片荷叶,碰撞从贴图 alpha 现算。表里 **45 条**:树 3 / 石头 6 / 木头(含树桩)5 / **荷叶 3(只浮在水面)** / 花草灌木 23 / 围栏 4 / 鸡舍 1。斧/镐能敲掉它们(tree → +2 木,wood → +1 木,rock → +1 石)。**一条 rect = 一个连通域**,图集里挨着的邻居不许被圈进来(见 `docs/DECISIONS.md#prop-art-rects`);**荷叶是 kind `pond`,不撒在草地上**(见 `docs/DECISIONS.md#pond-lily-pads`) |
-| 小路 | `GameTilemap/Path`(`scripts/world/farm_path.gd`)。`Paths.png` 里的横/竖条沿折线拼的**贴花**(75 块 / 47 格):主路走第 15 行(出生点就在路上)→ 东到牧场门、西到池塘边、中间往北进鸡圈。路占的格子不撒道具(`farm_props.gd::_path_cells()`),不生成碰撞体,不动地形(见 `docs/DECISIONS.md#farm-path`) |
+| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~340 个随机道具 + 39 段围栏 + 1 鸡舍 + 15 片荷叶,碰撞从贴图 alpha 现算。表里 **45 条**:树 3 / 石头 6 / 木头(含树桩)5 / **荷叶 4(只浮在水面)** / 花草灌木 16 / **停用 6(`kind parked`)** / 围栏 4 / 鸡舍 1。斧/镐能敲掉它们(tree → +2 木,wood → +1 木,rock → +1 石)。**一条 rect = 一个连通域**,图集里挨着的邻居不许被圈进来(见 `docs/DECISIONS.md#prop-art-rects`);**荷叶是 kind `pond`,不撒在草地上**(见 `docs/DECISIONS.md#pond-lily-pads`) |
+| 停用素材 | `kind "parked"` = 「登记在表里,但永远不摆」:平躺的树 #19 `bush_low` / #21 `bush_wide_alt`、以及 4 个「看着像果实」的粉色圆球(#22/#25/#26/#30)。不在 `SCATTER_KINDS`/`pond`/地标里 → 三条摆放路径全绕开;仍在 `KINDS` 里,所以运行日志会打 `0 parked`。见 `docs/DECISIONS.md#parked-kind` |
+| 小路 | `GameTilemap/Path`(`scripts/world/farm_path.gd` = `extends TileMapLayer`)。铺路 = 把 6 段 `RUNS` 折线(47 格,主路走第 15 行,出生点就在路上;东到牧场门、西到池塘边、中间往北进鸡圈)交给 **`set_cells_terrain_connect()`**,涂的是 TileSet 里那套一直没人用的 **`dirt` 地形**(`terrain_set 0 / terrain 1`,图集 `Tilled_Dirt_Wide.png`)—— 草边由 peering bit 自动接。路占的格子不撒道具(`farm_props.gd::_path_cells()`),不生成碰撞体,**不动草地地形/水位**(所以不用重跑 retile;`Paths.png` 那套 3px 贴花已废弃)。见 `docs/DECISIONS.md#farm-path` |
 | 工具 | 6 把:锄/水壶/种子/收获(作用在农田)+ 斧/镐(作用在地面物件)。斧/镐的名字是**像素推断**的,见 `docs/DECISIONS.md#gather-tools` 和 `docs/art/tools_objects.png` |
 | TileSet | `res://tilesets/test_tilemap.tres`(旧名沿用;水墙碰撞由 `farm_map.gd` 运行时生成) |
 | 玩家 | `res://scenes/characters/player.tscn`(32 个动画 = idle/walk x 4 朝向 + 6 把工具 x 4 朝向;由 `tools/gen_player_scene.py` 生成) |
@@ -290,20 +291,52 @@
     任何一张放大图里编号相同,用户可以只报号)、`docs/art/pond_lily_pads.png`
     (截图裁出来 4 倍放大的池塘)。
 
+- [x] **2026-10-05 小路改成 tile 地形 + 临停「躺树 / 果实」素材**(用户对着
+      `docs/art/props_numbered.png` 报号,一次四件事):
+  - **#19 `bush_low` + #21 `bush_wide_alt` = 一棵平躺在地上的树**(一大片绿树冠 +
+    右端一坨木头,**一个连通域**)—— 这就是最早「有些树好像倒下了」的谜底:它们不是
+    坏掉的树。要摆正得把像素转 90°(像素画一转就糊),用户说「不行就先不用它」→ 停用。
+  - **#18 `bush_leafy` 也是荷叶**(白边的圆叶子)→ 和 `tuft_a/b/c` **混着放**在池塘里
+    (`POND_LEAF_MIX`,`bush_leafy` 3/6 占多数)。两次用户都说「这是荷叶」,
+    把任何一种挪回草地都会把原来的 bug 复活,所以混放而不是替换。荷叶 3 → 4 条。
+  - **小路改成 tile**:`GameTilemap/Path` 从「贴花」变成 **`TileMapLayer`**,铺的是
+    TileSet 里一直没人用的 **`dirt` 地形**(`terrain_set 0 / terrain 1`,
+    `Tilled_Dirt_Wide.png`),用 `set_cells_terrain_connect()`;草边由 peering bit 自动接。
+    格子还是那 47 格、路线还是那 6 段 `RUNS`,但**不动草地地形、不动水位**,
+    所以不用重跑 retile。`Paths.png` 的 28 块细条从此用不到了(文件留着)。
+  - **「地上不应该有水果」**:离线上把 45 条道具逐条过了一遗(ASCII + 调色板),
+    这套素材**没有鲜红**:粉是 `(189,117,126)`/`(175,103,118)`,白的是高光。
+    因此把 4 个圆涓涓的粉色球先停用,等用户报号:#22 `flower_big` / #25 `flower_patch` /
+    #26 `flower_pink` / #30 `flower_rose`(如果其实是花,报个号就改回来)。
+  - **新 kind `parked`**:登记在表里但三条摆放路径都不会碰它(不在 `SCATTER_KINDS`、
+    不是 `pond`、不是地标),运行日志会打 `0 parked`。见 `docs/DECISIONS.md#parked-kind`。
+  - **自检 297 → 304 项**,新增 7 条:`parked props really stay off the map` /
+    `parked props are registered but never scattered` /
+    `the lily-pad mix only names pond props` /
+    `the lily-pad mix keeps the big white-rimmed leaf in the majority` /
+    `the road paints the dirt tileset` / `every road tile comes from the dirt tileset` /
+    `the road painted exactly its route cells (47)`。
+  - **像素级验证**:`check_leaf_shots.py` 重写成**按名字查 rect/调色板**(荷叶 4 种尺寸
+    不同)—— 7 片可见荷叶**每一片都把自己 100% 的调色板像素画了出来**
+    (`bush_leafy` 98/98、tuft 30/30),所在 16x16 格水色占多数 ✓;
+    路面单独量过:屏幕 y202..211 一排 ~500 个土色像素、上下各 3px 草边
+    = peering bit 该有的样子。
+  - `check_props.py` → `45/45 干净`,种数:树 3 / 石 6 / 木 5 / 荷叶 4 / 花草灌木 16 /
+    **停用 6** / 围栏 4 / 鸡舍 1。
+
 ## Next(按顺序做)
 
 0. **(等用户回话)素材确认**:
-   **荷叶已确认并做完了**(见上一条 Done)。还剩:
-   **(a) 「倒下的树」是哪几格?** 用户说「有些树好像倒下了」—— 我能查到的「躺着的木头」
-   只有 #10 `stump_round`、#11 `stump_small`(小树桩)、#12 `wood_log`(斜躺的木头 + 绿芽)、
-   #13 `wood_log_big`(粗的斜躺木头)、#14 `wood_pile`(扁平的一堆);
-   而三棵树 #1 `tree_big` / #2 `tree_flower` / #3 `tree_small` 逐个查过连通域形状,都是**立着的**
-   (上冠下杆 + 根部展开),代码里也没有任何 rotation/flip(全局搜过 `rotation|flip_h|flip_v|scale`)。
-   → 已生成 **`docs/art/props_numbered.png`**(全部 45 条,8 倍放大,**全局大编号**,
-   用户只要对着它报号),并把候选单独放大成 `docs/art/leaf_and_log_candidates.png`。
-   用户报号后的动作:从 `SCATTER_KINDS` 的撒点里去掉那几条(或者只让它们出现在池塘边),
-   改完跑 `check_props.py` + 自检。
-   **(b) 顺手确认名字**:道具 45 条 + `tools_objects.png`(斧/镐)+ `plants_sheet.png`(作物)。
+   **荷叶已确认(#18 `bush_leafy` + 三片 tuft,现在混着放在池塘里)**;
+   **「倒下的树」已定位 = #19 `bush_low` + #21 `bush_wide_alt`(一棵平躺的树,已停用)**。
+   还剩:
+   **(a) 「地上的水果」是哪几格?** 已停用 4 个候选:#22 `flower_big` / #25 `flower_patch` /
+   #26 `flower_pink` / #30 `flower_rose`(圆涓涓的粉色球)。**若其中某个其实是花,
+   报号给我改回 `deco`**;若都不是,请报出真正看着像水果的号
+   (对着 `docs/art/props_numbered.png`)。
+   **(b) 小路这个「中间一条土、上下 3px 草边」的样子对吗?** 路线没变(还是那 47 格),
+   变的只是画法(贴花 → `dirt` 地形)。
+   **(c) 顺手确认名字**:道具 45 条 + `tools_objects.png`(斧/镐)+ `plants_sheet.png`(作物)。
    改名字只动 `prop_db.gd` / `tool_icons.gd`,改完跑 `check_props.py` + 自检。
 1. **把 HUD 的「提示」用完**:斧/镐已经会发提示了(「Chopped a tree (+2 wood).」等),
    农田那四个工具的失败分支还是静默的。在 `farm_cell.gd` (已锄/已种/水够多)
@@ -376,8 +409,33 @@
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
+  → **`=== SELFTEST END: 304 checks, 0 failed ===`**,ERROR 区为空(只有那条已知无害的
+  `NodeFiniteStateMachine: 未知状态 'nonexistent'`)。本轮新增 7 条:
+  - `parked props really stay off the map`(运行日志里 `0 parked` 的引擎侧版本)
+  - `parked props are registered but never scattered`
+  - `the lily-pad mix only names pond props` / `... keeps the big white-rimmed leaf in the majority`
+  - `the road paints the dirt tileset` / `every road tile comes from the dirt tileset`
+    (遍历 `path.tile_set` 找到 `Tilled_Dirt_Wide.png` 那个 atlas source,再逐格比 `get_cell_source_id()`)
+  - `the road painted exactly its route cells (47)`(涂过的格子 == 折线算出的格子)
+  - 上一轮那些回归依然全绿:`-- path` 15 条、`-- ponds` 13 条、牧场/牛 13 条、狗、斧镐、水墙、地形。
+- 主场景 `run_project {projectPath: "D:\\godot_projects\\croptail"}`:
+  `[farm_props] 361 props (73 tree / 34 rock / 26 wood / 173 deco / 15 pond / 0 parked / 39 fence / 1 house) on 1482 open cells; 1678 collision boxes`
+  + `lily pads: bush_leafy@… / tuft_…@…` + `[farm_map] water walls: 101 collision shapes`,**无 ERROR**。
+- 截图复核(新路面):`shot_1.png` 里 cell row 15 → 屏幕 y202..211 一排 ~500 个土色像素
+  (`(232,207,166)` 十沟线 `(220,185,138)`),上下各 3px 草地色 —— 就是 `dirt` 地形的 peering bit
+  该接出来的样子(整条带子 5054/8208 = 62%,剩下的是道具/围栏压过去的);
+  竖支路 x504..519 从 y100 一直连到路面 ✓。
+- 荷叶像素复核:`python tools/check_leaf_shots.py <leaf.log>` → `bad 0`
+  (7 片可见荷叶每片都画出自己 100% 的调色板像素:`bush_leafy` 98/98、tuft 30/30;
+  6 片被 HUD 压住、32 片在画面外)。
+- `python tools/check_props.py` → **`45/45 entries look clean`、`0 problems, 0 warnings`**
+  (kind 统计:**deco 16 / fence 4 / house 1 / parked 6 / pond 4 / rock 6 / tree 3 / wood 5**)。
+
+## 上一次验证(2026-10-05 荷叶那轮)
+
+- `run_project {scene: "res://scenes/dev/selftest.tscn"}`
   → **`=== SELFTEST END: 297 checks, 0 failed ===`**,ERROR 区为空(只有一条已知无害的
-  `NodeFiniteStateMachine: 未知状态 'nonexistent'` 警告)。本轮新增:
+  `NodeFiniteStateMachine: 未知状态 'nonexistent'` 警告)。新增:
   - **荷叶 10 条**(`-- ponds` 里):`there are lily pads on the ponds (15)` /
     `no lily pad is on the grass` / `the lily pads keep off the shore` /
     `the lily pads are not solid` / `the lily pads are not choppable` /

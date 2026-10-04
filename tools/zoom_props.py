@@ -10,6 +10,12 @@
     python tools/zoom_props.py --all --out docs/art/props_numbered.png
     python tools/zoom_props.py tuft_a wood_log --out docs/art/x.png
     python tools/zoom_props.py --list          # 列出所有道具名
+
+⚠️ **编号是按 (kind 顺序, 名字) 排出来的 —— 改了某条道具的 kind 再重跑,编号会整体错位。**
+用户报过的号一律以**仓库里那一版** `docs/art/props_numbered.png` 为准:
+改 kind 前先看有没有人对着旧图报过号,改完要把新号写回 `docs/PROGRESS.md`。
+(2026-10-05 用户对着那版报了 #18/#19/#21/#22/#25/#26/#30,所以那一张**没有被重跑覆盖**;
+新 kind `parked` 不在 `KIND_ORDER` 里,排序时会落到最后,不会把 already 报过的号挤走。)
 """
 import os
 import sys
@@ -23,7 +29,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCALE = 8
 PAD = 12
 LABEL_H = 40
-KIND_ORDER = ["tree", "rock", "wood", "pond", "deco", "fence", "house"]
+KIND_ORDER = ["tree", "rock", "wood", "pond", "deco", "fence", "house"]  # 未知 kind 排最后(见 docstring 的编号警告)
 BG = (32, 32, 40)
 FG = (235, 235, 235)
 MUTED = (150, 150, 160)
