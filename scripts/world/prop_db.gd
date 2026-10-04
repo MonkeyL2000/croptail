@@ -63,17 +63,20 @@ const PROPS := {
 	"wood_pile": {"sheet": "biome", "rect": Rect2(80, 35, 16, 10), "kind": "wood", "solid": true},
 	"stump_round": {"sheet": "biome", "rect": Rect2(67, 36, 10, 10), "kind": "wood", "solid": true},
 	"stump_small": {"sheet": "biome", "rect": Rect2(52, 36, 8, 10), "kind": "wood", "solid": true},
-	"stump_log": {"sheet": "biome", "rect": Rect2(60, 68, 8, 9), "kind": "wood", "solid": true},
-	"stump_tiny": {"sheet": "biome", "rect": Rect2(25, 71, 7, 7), "kind": "wood", "solid": true},
 
 	# --- 灌木 / 草簇 / 麦子:不挡路,也不给东西 ---------------------------
-	# 前两条的矩形右边被**切掉**过:原来把紧挨着的一截树桩也圈进来了,
-	# 于是灌木右边凭空戳出一段木头(看着就像倒下的树)。那两截树桩现在
-	# 单独成了 stump_log / stump_tiny,归木头那组。
+	#
+	# 下面两条灌木的右边**贴着一截树桩**(作者就是把它画成一株灌木 + 一个树桩的
+	# 组合装饰):两块的像素是连着的,所以原来的 flood fill 量出来是整个 32x16。
+	# 曾经为了「灌木右边不要戳出一段木头」把矩形在接缝处切开、树桩单独当木头 ——
+	# 结果是**更糟**:灌木被切掉右侧一条边(边缘变直),而那一小截树桩又
+	# 被撒了一地,看着就是「地上躺着几根树桩」。现在按**连通域整体**取
+	# (一条 rect 正好一个连通域,见 tools/check_props.py 第 4 项体检),
+	# 组合装饰原样画出来,也不再往木头那组里塞半块精灵。
 	"bush_wide": {"sheet": "biome", "rect": Rect2(0, 48, 32, 16), "kind": "deco", "solid": false},
-	"bush_wide_alt": {"sheet": "biome", "rect": Rect2(36, 64, 24, 16), "kind": "deco", "solid": false},
-	"bush_low": {"sheet": "biome", "rect": Rect2(2, 68, 23, 12), "kind": "deco", "solid": false},
-	"bush_leafy": {"sheet": "biome", "rect": Rect2(128, 64, 14, 11), "kind": "deco", "solid": false},
+	"bush_wide_alt": {"sheet": "biome", "rect": Rect2(36, 64, 32, 16), "kind": "deco", "solid": false},
+	"bush_low": {"sheet": "biome", "rect": Rect2(2, 68, 30, 12), "kind": "deco", "solid": false},
+	"bush_leafy": {"sheet": "biome", "rect": Rect2(128, 64, 14, 10), "kind": "deco", "solid": false},
 	"shrub": {"sheet": "biome", "rect": Rect2(112, 68, 13, 9), "kind": "deco", "solid": false},
 	"sprig_b": {"sheet": "biome", "rect": Rect2(137, 74, 7, 5), "kind": "deco", "solid": false},
 	"tuft_a": {"sheet": "biome", "rect": Rect2(97, 18, 8, 5), "kind": "deco", "solid": false},

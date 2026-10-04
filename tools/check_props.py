@@ -128,7 +128,7 @@ def analyse(image, rect):
     return counts, (min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
 
 
-def sprites_of(image):
+def sprites_of(image, min_px=12):
     """图集里所有不透明像素的连通域(四邻域)—— 用来查「没登记」的精灵。"""
     w, h = image.size
     px = image.load()
@@ -150,9 +150,67 @@ def sprites_of(image):
                     if 0 <= nx < w and 0 <= ny < h and mask[ny][nx] and not seen[ny][nx]:
                         seen[ny][nx] = True
                         queue.append((nx, ny))
-            if len(pts) >= 12:
+            if len(pts) >= min_px:
                 out.append(pts)
     return out
+
+
+def component_boxes(image):
+    """图集里每个连通域的包围盒(小到 4 像素的碎点也算,免得漏掉细节)。"""
+    return [bbox(pts) for pts in sprites_of(image, min_px=4)]
+
+
+def label_map(image, min_px=4):
+    """每个不透明像素属于第几个连通域(0 = 透明/太小不算)。"""
+    w, h = image.size
+    labels = [[0] * w for _ in range(h)]
+    for index, pts in enumerate(sprites_of(image, min_px=min_px), start=1):
+        for x, y in pts:
+            labels[y][x] = index
+    return labels
+
+
+def inside_components(labels, rect):
+    """rect 里出现过的连通域编号 -> 像素数。"""
+    x, y, w, h = rect
+    found = Counter()
+    for yy in range(y, y + h):
+        for xx in range(x, x + w):
+            if labels[yy][xx]:
+                found[labels[yy][xx]] += 1
+    return found
+
+
+def component_issues(image, labels, boxes, rect, tolerance=1):
+    """一条 rect 应当**正好**圈住一个连通域,而且几乎正好是它的包围盒。
+
+    为什么不能用「包围盒相交」来判断:两个精灵的包围盒可以重叠,但像素并不挨着
+    (`bush_leafy` 底下那株小草就是这种)。按像素数才准。
+
+    两个判据(拼图块除外):
+      A. rect 里的不透明像素**只属于一个**连通域 —— 否则就是把邻居圈进来了
+         (两个精灵颜色一样时,老的调色板判据看不见这种情况)。
+      B. 那个连通域的包围盒不能比 rect 大出超过 `tolerance` 像素 —— 否则说明
+         rect 把精灵**切掉了一块**(老的 bush_low / bush_wide_alt 就是这样:
+         灌木右边连着的树桩被切在矩形外面,画出来灌木是缺一块的)。
+    """
+    found = inside_components(labels, rect)
+    issues = []
+    if not found:
+        issues.append("no opaque pixel inside this rect -> it is empty")
+        return issues
+    if len(found) > 1:
+        detail = ", ".join("#%d(%dpx @%s)" % (i, n, boxes[i - 1]) for i, n in found.most_common())
+        issues.append("holds %d sprites: %s -> a neighbour is glued in" % (len(found), detail))
+        return issues
+    index = next(iter(found))
+    box = boxes[index - 1]
+    outside = (box[0] < rect[0] - tolerance or box[1] < rect[1] - tolerance
+               or box[0] + box[2] > rect[0] + rect[2] + tolerance
+               or box[1] + box[3] > rect[1] + rect[3] + tolerance)
+    if outside:
+        issues.append("sprite #%d %s is cut off by this rect" % (index, box))
+    return issues
 
 
 def bbox(pts):
@@ -171,6 +229,8 @@ def main():
 
     problems = []
     warnings = []
+    boxes = {key: component_boxes(img) for key, img in images.items()}
+    labels = {key: label_map(img) for key, img in images.items()}
     print("== prop art check: %d entries ==" % len(props))
 
     # --- 1/2: 每条 rect 干净 + 分类对得上 --------------------------------
@@ -207,6 +267,9 @@ def main():
         for family in forbidden:
             if shares.get(family, 0.0) > SHARE_LIMIT:
                 issues.append("kind '%s' contains %.0f%% %s" % (kind, shares[family] * 100, family))
+        # 连通域判据:一条 rect = 一个精灵,而且正好是它的包围盒(拼图块除外)
+        if sheet not in TILING_SHEETS and sheet in boxes:
+            issues.extend(component_issues(image, labels[sheet], boxes[sheet], (x, y, w, h)))
         if issues:
             for issue in issues:
                 problems.append("%-14s kind=%-5s rect=%-18s %s" % (name, kind, str(rect), issue))

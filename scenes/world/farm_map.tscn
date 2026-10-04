@@ -1,9 +1,10 @@
-[gd_scene load_steps=5 format=4 uid="uid://ce6dfgcs7wjpk"]
+[gd_scene load_steps=6 format=4 uid="uid://ce6dfgcs7wjpk"]
 
 [ext_resource type="TileSet" uid="uid://cbqx1auglucu2" path="res://tilesets/test_tilemap.tres" id="1_py6nr"]
 [ext_resource type="Script" path="res://scripts/world/farm_map.gd" id="2_farmmap"]
 [ext_resource type="Script" path="res://scripts/world/farm_props.gd" id="3_props"]
 [ext_resource type="Script" path="res://scripts/farm/farm_plot.gd" id="4_plot"]
+[ext_resource type="Script" path="res://scripts/world/farm_path.gd" id="5_path"]
 
 [node name="FarmMap" type="Node2D"]
 script = ExtResource("2_farmmap")
@@ -23,6 +24,9 @@ tile_set = ExtResource("1_py6nr")
 position = Vector2(-11, 17)
 tile_map_data = PackedByteArray("AAASAAUABAAGAAAAAAAKAAYABAAGAAIAAAAYAAYABAAGAAEAAAAUAAcABAAGAAAAAAAdAAcABAADAAAAAAAJAAsABAAGAAIAAAAbAAwABAAGAAIAAAAeAAwABAAAAAAAAAAVAA0ABAADAAAAAAAZAA0ABAAFAAEAAAA=")
 tile_set = ExtResource("1_py6nr")
+
+[node name="Path" type="Node2D" parent="GameTilemap"]
+script = ExtResource("5_path")
 
 [node name="FarmPlot" type="Node2D" parent="."]
 position = Vector2(312, 107)

@@ -53,6 +53,8 @@ const COW_SCRIPT := preload("res://scripts/world/cow.gd")
 
 @export var map_path: NodePath = ^".."
 @export var plot_path: NodePath = ^"../FarmPlot"
+## 小路的节点(`farm_path.gd`)。路占的格子不撒道具。
+@export var path_path: NodePath = ^"../GameTilemap/Path"
 var plot: FarmPlot
 var player: Node2D
 ## 额外的「留空」世界坐标(main.gd 把宠物狗的出生点之类塞进来)。
@@ -77,11 +79,15 @@ var placed: Array[Dictionary] = []
 var blocked: Dictionary = {}
 ## 所有草地格(含被占的)。生成时填好,给 BFS / 自检查询用。
 var grass_cells: Dictionary = {}
+## 玩家的出生格(第一次建图时记下来)。玩法上没用,但自检要拿它比
+## 「小路有没有从家门口开始」。后续 rebuild 时玩家已经跑别处了,所以只记一次。
+var spawn_cell := Vector2i.ZERO
 ## 真正挡路的格子(只算实心物件)。灌木花丛虽然也占 `blocked`,但玩家可以踩过去,
 ## 所以连通性判断必须用它而不是 `blocked`,否则会把能走通的路误判成死角。
 var solid_cells: Dictionary = {}
 
 var _rng: RandomNumberGenerator
+var _spawn_seen := false
 var _root: Node2D
 ## 物件名 -> 已算好的碰撞矩形数组。同一棵树会出现几十次,算一次就够。
 var _collision_cache: Dictionary = {}
@@ -130,6 +136,9 @@ func _generate() -> void:
 	var reserved := {}
 	if player != null:
 		var spawn := _to_cell(player.global_position - origin)
+		if not _spawn_seen:
+			spawn_cell = spawn
+			_spawn_seen = true
 		for dx in range(-spawn_clear_cells, spawn_clear_cells + 1):
 			for dy in range(-spawn_clear_cells, spawn_clear_cells + 1):
 				reserved[spawn + Vector2i(dx, dy)] = true
@@ -149,6 +158,12 @@ func _generate() -> void:
 		for dx in range(-1, 2):
 			for dy in range(-1, 2):
 				reserved[center + Vector2i(dx, dy)] = true
+	# 小路上不长树:路是贴花,不会挡道具,不排掉的话就变成「树长在路中间」。
+	# 只排**草地**上的格子 —— 路的某一段万一压到水面(或者是农场图以外的格子),
+	# 本来也不在 candidates 里,这里不用管。
+	for cell in _path_cells():
+		if grass_cells.has(cell):
+			reserved[cell] = true
 
 	var candidates: Array[Vector2i] = []
 	for cell in grass_cells:
@@ -186,6 +201,18 @@ func _layer_cells(layer: TileMapLayer, origin: Vector2) -> Dictionary:
 		var local: Vector2 = layer.to_global(layer.map_to_local(cell)) - origin
 		out[_to_cell(local)] = true
 	return out
+
+
+## 小路盖住的格子。`farm_path.gd` 的格坐标和本节点是同一套(都是相对
+## `FarmMap` 的格),所以直接拿过来用,不用再转一次。
+func _path_cells() -> Array:
+	var path := get_node_or_null(path_path)
+	if path == null:
+		return []
+	if not path.has_method("cells"):
+		push_warning("FarmProps: %s 上没有 cells() —— 小路那格不会被留空" % path_path)
+		return []
+	return path.cells()
 
 
 static func _cell_sort(a: Vector2i, b: Vector2i) -> bool:

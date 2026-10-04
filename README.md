@@ -63,7 +63,7 @@ or open `project.godot` in the editor and hit F5.
 | `scripts/farm/` | `FarmPlot`, `FarmCell`, `CropData`, `CropDB` |
 | `scripts/player/` | player body + idle / walk / use states |
 | `scripts/state_machine/` | generic node-based FSM, game-agnostic |
-| `scripts/world/` | map collision (`farm_map.gd`), ground props + landmarks + gather rules (`farm_props.gd`, `prop_db.gd`), chickens (`chicken.gd`), cows (`cow.gd`), pet dog (`dog.gd`) |
+| `scripts/world/` | map collision (`farm_map.gd`), ground props + landmarks + gather rules (`farm_props.gd`, `prop_db.gd`), the hand-laid **road decal** (`farm_path.gd`), chickens (`chicken.gd`), cows (`cow.gd`), pet dog (`dog.gd`) |
 | `scripts/ui/` | HUD and the icon atlases (`hud.gd`, `tool_icons.gd`, `item_icon.gd`) |
 | `docs/` | `PROGRESS.md` (where it is) and `DECISIONS.md` (why) |
 | `docs/art/` | generated reference images (map render, sheet grids, action layout, labelled prop sheet) |
@@ -78,13 +78,14 @@ hand — it drives the real scenes and prints a summary:
 godot --path . res://scenes/dev/selftest.tscn
 ```
 
-It ends with `=== SELFTEST END: N checks, 0 failed ===` (273 checks at the time
+It ends with `=== SELFTEST END: N checks, 0 failed ===` (287 checks at the time
 of writing) and covers soil rules, the growth cycle, sprite atlas coordinates
 (incl. "a prop rect must hold exactly one sprite", "the pet dog's white
 background is keyed out" and "no cow animation frame is empty"), state
 transitions, movement, main-scene wiring, the water collision walls, the fenced
-pen / chickens / cows, axe & pickaxe rules, the ponds, and the dog following the
-player around a wall.
+pen / chickens / cows, axe & pickaxe rules, the ponds, the road (every road cell
+is grass, the road is one connected run, nothing is scattered onto it) and the
+dog following the player around a wall.
 
 The prop table (`scripts/world/prop_db.gd`) also has an offline checker, because
 a rect that accidentally swallows a neighbouring sprite raises no error at all:

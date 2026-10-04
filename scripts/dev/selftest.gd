@@ -857,12 +857,13 @@ func _test_main_scene() -> void:
 
 	await _test_tree_blocks_player(main_props, main_player)
 	_test_landmarks(main_props)
+	_test_path(main, main_props)
 	await _test_pasture(main_props)
 	await _test_gather(main_props, main_player, indicator, main.get_node("HUD"))
 	# 这里必须 await:它内部有 60 个物理帧的推墙循环。不 await 的话它会变成
 	# 「发射后不管」的协程,和后面的测试**抢玩家位置** —— 后果是它读到的
 	# 玩家位置是别的测试摆的(实测停在 416.8 而不是塘边的 -221)。
-	await _test_ponds(map, main_player, main_plot)
+	await _test_ponds(map, main_player, main_plot, main_props)
 	_test_prop_art()
 	_test_every_wood_variant_is_choppable(main_props)
 	await _test_dog(main, main_player)
@@ -1162,6 +1163,80 @@ func _step_physics(frames: int) -> void:
 ## 而道具占用簿(blocked / solid_cells)是 props 自己那套。两套差半格的话,
 ## 围栏会整排漂到水里(岛外面全是一片水,看起来还挺正常),而且
 ## 碰撞墙也跟着漂 —— 玩家会撞到看不见的东西。
+## 农田占的格子(道具格坐标):plot 的 position 就是左上角那一格。
+func _plot_cell_rect(main: Node2D, props: FarmProps) -> Rect2:
+	var plot: FarmPlot = main.get_node("FarmMap/FarmPlot")
+	var origin := props.to_local_cell(plot.global_position)
+	return Rect2(Vector2(origin), Vector2(plot.columns, plot.rows))
+
+
+## 小路:`Paths.png` 的横/竖条沿折线拼出来的贴花(`farm_path.gd`)。
+func _test_path(main: Node2D, props: FarmProps) -> void:
+	print("-- path")
+	var path := main.get_node_or_null("FarmMap/GameTilemap/Path")
+	check("the map has a path decal", path != null)
+	if path == null:
+		return
+	var nature := main.get_node("FarmMap/GameTilemap/Nature")
+	var tilemap := nature.get_parent()
+	var plot := main.get_node("FarmMap/FarmPlot")
+	check("the path sits inside GameTilemap, after the grass layers",
+		path.get_parent() == tilemap and path.get_index() > nature.get_index())
+	check("the path is drawn below the plot and the props",
+		tilemap.get_index() < plot.get_index()
+		and plot.get_index() < main.get_node("FarmMap/Props").get_index())
+	check("the path laid down some pieces (%d)" % path.piece_count(), path.piece_count() >= 4)
+	var cells: Array = path.cells()
+	check("the path covers some cells (%d)" % cells.size(), cells.size() >= 20)
+
+	# 路只能铺在草地上:某一段算错格子就会铺到水里,画面上是「一条路伸进池塘」
+	var off_grass: Array[String] = []
+	for cell in cells:
+		if not props.grass_cells.has(cell):
+			off_grass.append(str(cell))
+	check("every path cell is grass (no road laid on water)", off_grass.is_empty())
+	if not off_grass.is_empty():
+		print("      不在草地上的格子: %s" % " ".join(off_grass))
+
+	# 铺了路的格子上不该再长树 / 石头 —— 这是 farm_props 里预留格子的那一条
+	var on_prop: Array[String] = []
+	for cell in cells:
+		var entry := props.prop_at(cell)
+		if not entry.is_empty():
+			on_prop.append("%s=%s" % [cell, entry.get("name", "?")])
+	check("nothing was scattered onto the road (%d cells)" % cells.size(), on_prop.is_empty())
+	if not on_prop.is_empty():
+		print("      长在路上的东西: %s" % " ".join(on_prop))
+
+	# 路也不能横穿农田
+	var plot_rect := _plot_cell_rect(main, props)
+	var on_plot: Array[String] = []
+	for cell in cells:
+		if plot_rect.has_point(Vector2(cell)):
+			on_plot.append(str(cell))
+	check("the road does not run across the farm plot", on_plot.is_empty())
+
+	# 路必须是**连成一整条**的:两段接不上就是一个断口
+	var seen := {}
+	var stack: Array[Vector2i] = [cells[0]]
+	seen[cells[0]] = true
+	while not stack.is_empty():
+		var cell: Vector2i = stack.pop_back()
+		for step in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var q: Vector2i = cell + step
+			if seen.has(q) or not cells.has(q):
+				continue
+			seen[q] = true
+			stack.append(q)
+	check("the road is one connected run (%d of %d cells)" % [seen.size(), cells.size()],
+		seen.size() == cells.size())
+
+	# 从出生点能顺着路走到牧场门口 —— 路才是「有用」的
+	check("the road starts at the spawn cell %s" % props.spawn_cell, cells.has(props.spawn_cell))
+	check("the road reaches the pasture's gate (33,15)", cells.has(Vector2i(33, 15)))
+	check("the road reaches the pond shore (2,12)", cells.has(Vector2i(2, 12)))
+
+
 func _test_landmarks(props: FarmProps) -> void:
 	print("-- landmarks (fence pen / coop / chickens)")
 	check("the pen is fenced", props.count_kind("fence") >= 14)
@@ -1480,7 +1555,11 @@ func _test_every_wood_variant_is_choppable(props: FarmProps) -> void:
 func _test_prop_art() -> void:
 	print("-- prop art (one rect = one sprite)")
 	var images := {}
+	var labels := {}
+	var boxes := {}
 	var glued := 0
+	var foreign := 0
+	var clipped := 0
 	var mislabelled := 0
 	var out_of_bounds := 0
 	var seen := {}
@@ -1506,6 +1585,23 @@ func _test_prop_art() -> void:
 		# 围栏是拼图块(横杆本来就伸到格子外),鸡舍是一整张图 —— 都不适用
 		if sheet_name == "fence" or sheet_name == "house":
 			continue
+		if not labels.has(path):
+			labels[path] = _label_map(image)
+			boxes[path] = _label_boxes(labels[path], image.get_width(), image.get_height())
+		var found := _components_inside(labels[path], image.get_width(), rect)
+		if found.size() != 1:
+			foreign += 1
+			var detail: Array[String] = []
+			for id in found:
+				detail.append("#%d(%dpx @%s)" % [id, found[id], boxes[path][id]])
+			print("      %s rect %s holds %d sprites: %s"
+				% [prop_name, rect, found.size(), " ".join(detail)])
+		else:
+			var box: Rect2 = boxes[path][found.keys()[0]]
+			if box.position.x < rect.position.x - 1.0 or box.position.y < rect.position.y - 1.0 \
+					or box.end.x > rect.end.x + 1.0 or box.end.y > rect.end.y + 1.0:
+				clipped += 1
+				print("      %s rect %s cuts the sprite %s" % [prop_name, rect, box])
 		var counts := _prop_family_counts(image, rect)
 		var main := _prop_main_family(counts)
 		if main == "":
@@ -1523,6 +1619,11 @@ func _test_prop_art() -> void:
 
 	check("every prop rect is inside its sheet", out_of_bounds == 0)
 	check("no prop rect has a neighbour glued in (%d rects)" % checked, glued == 0)
+	# 连通域版的「一条 rect = 一个精灵」。颜色家族那个判据看不出**同色**的两株
+	# 精灵贴在一起(绿灌木 + 绿芽苗),也看不出「矩形把精灵切掉一块」
+	# (bush_low 右边连着的树桩被切在外面)。这里数像素的归属。
+	check("every prop rect holds exactly one sprite (%d rects)" % checked, foreign == 0)
+	check("no prop rect cuts its sprite in half", clipped == 0)
 	check("no two props share a rect", seen.size() == checked)
 	check("every prop kind matches its palette", mislabelled == 0)
 	# 贴图不能比占地大:大了就会糊到隔壁格上(碰撞箱是按格算的,两边就对不上了)
@@ -1544,6 +1645,71 @@ func _test_prop_art() -> void:
 		if PropDB.names_of_kind(kind).size() < 2:
 			thin.append(kind)
 	check("every scattered kind has at least 2 variants", thin.is_empty())
+
+
+## 图集里每个不透明像素属于第几个连通域(0 = 透明或碎点)。四邻域。
+## 用一维数组存,免得建二维数组(图集最大 240x96,完全够快)。
+func _label_map(image: Image) -> Array:
+	var w := image.get_width()
+	var h := image.get_height()
+	var labels: Array = []
+	labels.resize(w * h)
+	labels.fill(0)
+	var next := 0
+	var steps: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	for y in h:
+		for x in w:
+			if labels[y * w + x] != 0 or image.get_pixel(x, y).a <= 0.08:
+				continue
+			next += 1
+			var stack: Array[Vector2i] = [Vector2i(x, y)]
+			var pts: Array[Vector2i] = []
+			labels[y * w + x] = next
+			while not stack.is_empty():
+				var point: Vector2i = stack.pop_back()
+				pts.append(point)
+				for step in steps:
+					var q: Vector2i = point + step
+					if q.x < 0 or q.y < 0 or q.x >= w or q.y >= h:
+						continue
+					if labels[q.y * w + q.x] != 0 or image.get_pixel(q.x, q.y).a <= 0.08:
+						continue
+					labels[q.y * w + q.x] = next
+					stack.append(q)
+			if pts.size() < 4:
+				# 碎点不算精灵(像素画的描边会掉几个孤立点),把编号退回去
+				for point in pts:
+					labels[point.y * w + point.x] = 0
+	return labels
+
+
+## 每个连通域的包围盒。
+func _label_boxes(labels: Array, w: int, h: int) -> Dictionary:
+	var boxes := {}
+	for y in h:
+		for x in w:
+			var id: int = labels[y * w + x]
+			if id == 0:
+				continue
+			if boxes.has(id):
+				var rect: Rect2 = boxes[id]
+				var low := Vector2(minf(rect.position.x, x), minf(rect.position.y, y))
+				var high := Vector2(maxf(rect.end.x, x + 1), maxf(rect.end.y, y + 1))
+				boxes[id] = Rect2(low, high - low)
+			else:
+				boxes[id] = Rect2(Vector2(x, y), Vector2.ONE)
+	return boxes
+
+
+## 这条 rect 里的不透明像素分别是哪些连通域的 -> {编号: 像素数}
+func _components_inside(labels: Array, w: int, rect: Rect2) -> Dictionary:
+	var found := {}
+	for y in range(int(rect.position.y), int(rect.end.y)):
+		for x in range(int(rect.position.x), int(rect.end.x)):
+			var id: int = labels[y * w + x]
+			if id != 0:
+				found[id] = int(found.get(id, 0)) + 1
+	return found
 
 
 ## 只按颜色家族数一数(阴影单独一族;透明的不算)。
@@ -1634,7 +1800,11 @@ func _prop_family(color: Color) -> String:
 
 
 ## 池塘:岛内「没有草」的那些格就是塘 —— 玩家不许走进去,而且要正好停在塘边。
-func _test_ponds(map: Node, walker: Player, farm: FarmPlot) -> void:
+##
+## 选推的那个点时只挑**周围没道具**的草地格:第一版撞上过「玩家被摆在一棵
+## 树里面」——树、石头都是有碰撞箱的,玩家被从碰撞箱里挤出来,停在离塘 4 像素
+## 的地方,于是这一条看起来像「水墙不平」。(水墙本身没问题,是测试选点不好。)
+func _test_ponds(map: Node, walker: Player, farm: FarmPlot, props: FarmProps) -> void:
 	print("-- ponds")
 	var grass_layer: TileMapLayer = map.get_node("GameTilemap/grass")
 	var cells := grass_layer.get_used_cells()
@@ -1670,7 +1840,7 @@ func _test_ponds(map: Node, walker: Player, farm: FarmPlot) -> void:
 	for side in [[Vector2i(1, 0), Vector2i(-1, 0)], [Vector2i(0, 1), Vector2i(0, -1)]]:
 		for hole in holes:
 			for step in side:
-				if grass.has(hole + step):
+				if grass.has(hole + step) and _prop_free_around(props, hole + step):
 					pond_cell = hole
 					grass_cell = hole + step
 					push = -Vector2(step)
@@ -1713,6 +1883,15 @@ func _test_ponds(map: Node, walker: Player, farm: FarmPlot) -> void:
 	print("      池塘: 塘格 %s, 从 %s 推 %s, 圆心停在 %.1f, 期望 %.1f, 差 %.1f" % [
 		pond_cell, grass_cell, push, actual, edge, absf(actual - edge)])
 	check("the pond wall is flush with the water edge (within 1.5px)", absf(actual - edge) <= 1.5)
+
+
+## 这一格周围(含自己)没有道具的碰撞箱吗。自检里把玩家摆到某处之前先问一句,
+## 不然玩家会被摆在树里、挤出来,测出来的就是「被挤到哪儿」而不是要测的东西。
+func _prop_free_around(props: FarmProps, cell: Vector2i) -> bool:
+	for step in [Vector2i.ZERO, Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		if not props.prop_at(cell + step).is_empty():
+			return false
+	return true
 
 
 ## 两个格坐标矩形有重叠吗(左上角 + 尺寸那一套)
