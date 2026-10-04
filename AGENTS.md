@@ -58,6 +58,7 @@
 | `sprite_inventory.py` | 任意一张图集的**连通域清单**(包围盒 / 像素数 / 颜色家族 / ASCII 缩略图),可交叉对照 `prop_db.gd` 的 rect(`--rects` 会标出 `covered_by=NOTHING`)。「这一格到底画的什么」先问它 |
 | `ascii_sheet.py` | 把图集/单条 rect 打成**字符画**(一个像素一个字母、按颜色家族上色)—— 助手看不到图,只能靠这个分 «树 / 倒木»「荷叶 / 灌木」这种靠形状的差别 |
 | `annotate_props.py` | 把 `prop_db.gd` 里每条 rect 描边 + 编号画到两个道具图集上(`docs/art/props_sheet.png`) —— 「素材放错了」的对照图,人工核对用 |
+| `zoom_props.py` | 把**指定的几条**道具 8 倍放大拼成一张小图(`python tools/zoom_props.py tuft_a wood_log --out docs/art/x.png`) —— 拿去问用户「你说的是不是这个」时用;`--list` 列全部名字 |
 | `carve_ponds.py` | 按椭圆删草地格、挖出池塘(`--dry-run` 可看效果)。改完**必须**跑 `retile.tscn` + `retile_grass.py` |
 | `render_map.py` | 离线把 `farm_map.tscn` 的地形层合成成一张整图(`docs/art/map.png`)。**看草坪对不对看这张**,不要在游戏里对着一小块猜 |
 | `extract_props.py` | 连通域分析道具图集(只是**建议**,权威表在 `prop_db.gd`)。⚠️ 它的 rect 会把**挨着摆的两块精灵粘成一块**,只能当参考 —— 见 DECISIONS#prop-art-rects |

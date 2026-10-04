@@ -19,6 +19,8 @@
 | 素材对照图 | `python tools/annotate_objects.py` → `docs/art/tools_objects.png`(把代码认定的名字写在斧/镐/围栏/鸡舍的放大图上,人工核对用) |
 | **道具对照图** | `python tools/annotate_props.py` → `docs/art/props_sheet.png`(`prop_db.gd` 里每条 rect 描边 + 编号 + 名字/kind/占地;怀疑「素材放错了」时看这张) |
 | 道具表体检 | `python tools/check_props.py`(每条 rect 是不是**正好一个连通域(+1px 容差)**、kind 和调色板对不对、一条精灵不被两条 rect 切,退出码 0 = 全过) |
+| 道具放大镜 | `python tools/zoom_props.py <名字...>` → 指定的几条道具 8 倍放大 + 编号(`docs/art/leaf_and_log_candidates.png` 就是这么生成的,拿去问用户用) |
+| 连通域清单 | `python tools/sprite_inventory.py <sheet>`(每块精灵的包围盒/像素数/颜色家族/ASCII 缩略图;`--rects` 标出没被任何 rect 盖住的) |
 | 动作版式图 | `python tools/annotate_actions.py` → `docs/art/actions_groups.png`(3 个动作组 x 4 个朝向,人工核对用) |
 | 地形图块重算 | `res://scenes/dev/retile.tscn`(改了地图形状后要跑;先自校验参考图) |
 | 地图速览 | `res://scenes/dev/map_dump.tscn`(打 ASCII 地图) |
