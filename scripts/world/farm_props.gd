@@ -46,6 +46,12 @@ const COW_COUNT := 2
 ## 牛的贴图是 28x17(鸡才 11x12),活动范围从围栏往里再收这么多像素
 const COW_ROAM_INSET := 18.0
 
+## 每片池塘里浮几片荷叶。池塘水面本身就是走不进去的,荷叶纯粹好看,
+## 所以不用很多 —— 但「每片池塘至少一片」自检会钉住(用户就是嫌荷叶长到草地上去了)。
+const POND_LEAVES := 5
+## 荷叶离岸边至少几格。叶子 8x5,贴边摆会画出水面盖到草地上,看着又像「长在岸上」。
+const POND_LEAF_MARGIN := 1
+
 ## 鸡的脚本。不用 class_name:`preload` 就行,少一次「新 class_name 要跑一遍编辑器」
 const CHICKEN_SCRIPT := preload("res://scripts/world/chicken.gd")
 ## 牛的脚本。同理
@@ -183,6 +189,7 @@ func _generate() -> void:
 
 	_place_all(candidates)
 	_place_landmarks()
+	_place_pond_decor()
 
 	var counts := []
 	for kind in PropDB.KINDS:
@@ -190,6 +197,12 @@ func _generate() -> void:
 	print("[farm_props] %d props (%s) on %d open cells; %d collision boxes" % [
 		placed.size(), " / ".join(counts), candidates.size(), _collision_count()
 	])
+	var leaves := []
+	for entry in placed:
+		if entry["kind"] == "pond":
+			leaves.append("%s@%d,%d" % [entry["name"], entry["cell"].x, entry["cell"].y])
+	if not leaves.is_empty():
+		print("[farm_props] lily pads: %s" % " ".join(leaves))
 
 
 ## 把 TileMapLayer 的 used_cells 换算成本节点坐标空间里的格坐标。
@@ -292,6 +305,99 @@ func _place_named(prop_name: String, cell: Vector2i, size: Vector2i = Vector2i.Z
 	if size == Vector2i.ZERO:
 		size = PropDB.footprint(prop_name)
 	return _spawn(prop_name, cell, size, data["kind"])
+
+
+## 荷叶:浮在池塘**水面上**的装饰(`tuft_a/b/c`,kind `pond`)。
+##
+## 以前它们是 `deco`,和灌木一起撒在草地上 —— 用户看到就说「荷叶放到草地上了,
+## 应该放在池塘里」。现在只在这里摆,`SCATTER_KINDS` 里没有 `pond`,草地撒点碰不到。
+##
+## 池塘格怎么算:草地层铺出来的是**一个矩形挖掉三个椭圆**,所以
+## 「草格的包围盒内的非草格」就是水面(和自检 `_test_ponds` 用的是同一套算法)。
+## 这些格本来就不在 `grass_cells` 里,撒点本来就不会碰它们。
+func _place_pond_decor() -> void:
+	var options := PropDB.names_of_kind("pond")
+	if options.is_empty():
+		return
+	for pond in _pond_cells():
+		var open: Array[Vector2i] = []
+		for cell in pond:
+			if _is_mid_pond(cell):
+				open.append(cell)
+		open.sort_custom(_cell_sort)
+		var taken: Array[Vector2i] = []
+		for cell in open:
+			if taken.size() >= POND_LEAVES:
+				break
+			var clear := true
+			for other in taken:
+				# 两片叶子靠得比一格还近就会叠在一起,难看
+				if absi(other.x - cell.x) <= 1 and absi(other.y - cell.y) <= 1:
+					clear = false
+					break
+			if not clear:
+				continue
+			_place_leaf(options[_rng.randi_range(0, options.size() - 1)], cell)
+			taken.append(cell)
+
+
+## 摆一片荷叶。位置放在格的**中心**而不是格底:浮在水面上的东西上下居中才像
+## 飘着,而 `_make_node()` 默认把精灵底边对齐格底(那是给站在地上的道具用的)。
+## 用整数位移,免得半像素把像素画糊掉。
+func _place_leaf(prop_name: String, cell: Vector2i) -> void:
+	var entry := _place_named(prop_name, cell)
+	if entry.is_empty():
+		return
+	var node: Node2D = entry["node"]
+	var height: float = PropDB.get_prop(prop_name)["rect"].size.y
+	node.position.y -= int((CELL_SIZE - height) * 0.5)
+
+
+## 池塘水面格,按连通域分堆(四邻域) —— 三个池塘就是三堆。
+## 水面 = 草地包围盒里「不是草」的格(草地层是矩形挖洞铺的)。
+func _pond_cells() -> Array:
+	if grass_cells.is_empty():
+		return []
+	var low := Vector2i(1 << 30, 1 << 30)
+	var high := Vector2i(-(1 << 30), -(1 << 30))
+	for cell in grass_cells:
+		low = Vector2i(mini(low.x, cell.x), mini(low.y, cell.y))
+		high = Vector2i(maxi(high.x, cell.x), maxi(high.y, cell.y))
+	var water := {}
+	for x in range(low.x, high.x + 1):
+		for y in range(low.y, high.y + 1):
+			var cell := Vector2i(x, y)
+			if not grass_cells.has(cell):
+				water[cell] = true
+	var ponds: Array = []
+	var seen := {}
+	for start in water:
+		if seen.has(start):
+			continue
+		seen[start] = true
+		var stack: Array[Vector2i] = [start]
+		var pond: Array[Vector2i] = []
+		while not stack.is_empty():
+			var point: Vector2i = stack.pop_back()
+			pond.append(point)
+			for step in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var next: Vector2i = point + step
+				if seen.has(next) or not water.has(next):
+					continue
+				seen[next] = true
+				stack.append(next)
+		ponds.append(pond)
+	return ponds
+
+
+## 这格算不算「塘中央」:周围 POND_LEAF_MARGIN 圈里都不能有草,
+## 不然荷叶会画出水面盖到岸上。
+func _is_mid_pond(cell: Vector2i) -> bool:
+	for dx in range(-POND_LEAF_MARGIN, POND_LEAF_MARGIN + 1):
+		for dy in range(-POND_LEAF_MARGIN, POND_LEAF_MARGIN + 1):
+			if grass_cells.has(cell + Vector2i(dx, dy)):
+				return false
+	return true
 
 
 ## 围栏圈 + 鸡舍 + 鸡 + 牧场 + 牛。不随机,位置就是下面的 PEN_RECT / HOUSE_RECT / PASTURE_RECT。

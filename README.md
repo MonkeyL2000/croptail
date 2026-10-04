@@ -78,14 +78,14 @@ hand — it drives the real scenes and prints a summary:
 godot --path . res://scenes/dev/selftest.tscn
 ```
 
-It ends with `=== SELFTEST END: N checks, 0 failed ===` (287 checks at the time
+It ends with `=== SELFTEST END: N checks, 0 failed ===` (297 checks at the time
 of writing) and covers soil rules, the growth cycle, sprite atlas coordinates
 (incl. "a prop rect must hold exactly one sprite", "the pet dog's white
 background is keyed out" and "no cow animation frame is empty"), state
 transitions, movement, main-scene wiring, the water collision walls, the fenced
-pen / chickens / cows, axe & pickaxe rules, the ponds, the road (every road cell
-is grass, the road is one connected run, nothing is scattered onto it) and the
-dog following the player around a wall.
+pen / chickens / cows, axe & pickaxe rules, the ponds (incl. "no lily pad is on
+the grass"), the road (every road cell is grass, the road is one connected run,
+nothing is scattered onto it) and the dog following the player around a wall.
 
 The prop table (`scripts/world/prop_db.gd`) also has an offline checker, because
 a rect that accidentally swallows a neighbouring sprite raises no error at all:

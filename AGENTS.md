@@ -33,7 +33,7 @@
 | `scripts/farm/` | 农田:`crop_data.gd`、`crop_db.gd`、`farm_cell.gd`(一格)、`farm_plot.gd`(网格+规则)、`target_indicator.gd`(面前那格的指示框) |
 | `scripts/player/` | 玩家本体 + 三个状态(idle/walk/use) |
 | `scripts/state_machine/` | 通用节点状态机(与游戏解耦) |
-| `scripts/world/` | 地图与地面物件:`farm_map.gd`(水墙)、`farm_props.gd`(撒道具/地标/斧镐规则)、`farm_path.gd`(小路贴花)、`prop_db.gd`(道具表,45 条 rect)、`chicken.gd`、`cow.gd`、`dog.gd`(宠物狗,重走玩家的脚印跟随) |
+| `scripts/world/` | 地图与地面物件:`farm_map.gd`(水墙)、`farm_props.gd`(撒道具/地标/斧镐规则)、`farm_path.gd`(小路贴花)、`prop_db.gd`(道具表,45 条 rect:树 3 / 石 6 / 木 5 / 荷叶 3 / 花草灌木 23 / 围栏 4 / 鸡舍 1)、`chicken.gd`、`cow.gd`、`dog.gd`(宠物狗,重走玩家的脚印跟随) |
 | `scripts/ui/` | HUD(`hud.gd`)、图标表(`tool_icons.gd` / `item_icon.gd`) |
 | `main.tscn` 的节点顺序 | `FarmMap` → `Player` → `Dog` → `TargetIndicator`(指示框必须在最后 = 画在最上面),HUD 是 `CanvasLayer` 永远在最上 |
 | `scenes/dev/` | 开发工具场景:`selftest`(自检)、`screenshot`(出图)、`map_dump`(ASCII 地图)、`retile`(重算地形图块)、`grass_terrain_ref`(旧地图快照,当 peering 的标准答案) |
@@ -58,7 +58,8 @@
 | `sprite_inventory.py` | 任意一张图集的**连通域清单**(包围盒 / 像素数 / 颜色家族 / ASCII 缩略图),可交叉对照 `prop_db.gd` 的 rect(`--rects` 会标出 `covered_by=NOTHING`)。「这一格到底画的什么」先问它 |
 | `ascii_sheet.py` | 把图集/单条 rect 打成**字符画**(一个像素一个字母、按颜色家族上色)—— 助手看不到图,只能靠这个分 «树 / 倒木»「荷叶 / 灌木」这种靠形状的差别 |
 | `annotate_props.py` | 把 `prop_db.gd` 里每条 rect 描边 + 编号画到两个道具图集上(`docs/art/props_sheet.png`) —— 「素材放错了」的对照图,人工核对用 |
-| `zoom_props.py` | 把**指定的几条**道具 8 倍放大拼成一张小图(`python tools/zoom_props.py tuft_a wood_log --out docs/art/x.png`) —— 拿去问用户「你说的是不是这个」时用;`--list` 列全部名字 |
+| `zoom_props.py` | 把指定的几条(或 `--all` 全部 45 条)道具 8 倍放大拼成一张图,左上角印**全局大编号**(`python tools/zoom_props.py --all --out docs/art/props_numbered.png`)—— 拿去问用户「你说的是哪一号」时用;编号在任何一张放大图上都一致。`--list` 列全部名字 |
+| `check_leaf_shots.py` | 拿截图数像素,验证**荷叶真画在水面上**(`python tools/check_leaf_shots.py <leaf.log>`,`[leaf]` 行由 `scenes/dev/screenshot.tscn` 打印)。它会把 HUD 面板减掉(见下面那条) |
 | `carve_ponds.py` | 按椭圆删草地格、挖出池塘(`--dry-run` 可看效果)。改完**必须**跑 `retile.tscn` + `retile_grass.py` |
 | `render_map.py` | 离线把 `farm_map.tscn` 的地形层合成成一张整图(`docs/art/map.png`)。**看草坪对不对看这张**,不要在游戏里对着一小块猜 |
 | `extract_props.py` | 连通域分析道具图集(只是**建议**,权威表在 `prop_db.gd`)。⚠️ 它的 rect 会把**挨着摆的两块精灵粘成一块**,只能当参考 —— 见 DECISIONS#prop-art-rects |
@@ -142,6 +143,19 @@
   `annotate_objects.py` / `annotate_props.py` / `annotate_terrain.py` 会把格子坐标和
   代码认定的名字画到图上,让用户看一眼就能回答。斧/镐的名字就是这么来的
   (推断值,见 DECISIONS#gather-tools);不报错但画错的 bug 都靠这个抓。
+- **荷叶(kind `pond`)只浮在池塘水面上,不许回到草地撒点里**:`prop_db.gd` 里它
+  不在 `SCATTER_KINDS`,只由 `farm_props.gd::_place_pond_decor()` 摆
+  (离岸 ≥1 格、两片不挨着、居中在格心上)。要验它:引擎内 10 条 + 截图数像素
+  (`tools/check_leaf_shots.py`)。见 DECISIONS#pond-lily-pads。
+- **截图查像素时先把 HUD 减掉**:HUD 是 `CanvasLayer`,永远画在世界之上。
+  同一个屏幕矩形,一片荷叶在 shot_1 里数出 30 个叶子像素、在 shot_3 里数出 0 ——
+  因为它正好压在底部消息栏 `(112,310,416,20)` 底下。**看不见不等于没画**。
+  五块面板:`(0,0,640,22)` / `(112,310,416,20)` / `(0,330,166,30)` /
+  `(524,330,54,30)` / `(582,330,54,30)`。见 DECISIONS#hud-hides-world。
+- **测试不许断言「随机的初始状态」**:牛的朝向原来断言「进场时 `flip_h` 是 false」,
+  实际是在赌「随机挑的第一个目标在它右边」—— 荷叶换 kind 之后 `_rng` 消耗次数变了,
+  这条就无端变红。要把状态**驱动**到想验的样子(换活动范围 / 直接设状态 / 注入种子),
+  再看结果。见 DECISIONS#tests-must-not-depend-on-rng。
 - **自检里带 `await` 的测试函数必须 `await` 调用**:`_test_ponds()` 内部有 60 个物理帧的
   推墙循环,一开始是「不 await 直接调」—— 它就成了发射后不管的协程,和后面的测试
   **抢玩家位置**,报出一个假失败(算出的落点停在 416.8,期望 -221)。任何 `await` 过的

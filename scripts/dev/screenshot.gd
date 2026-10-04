@@ -50,6 +50,7 @@ func _ready() -> void:
 		# 等画面稳下来再读:指示框在自己的 _process 里更新,刚传完坐标时读到的还是上一帧
 		_dump_indicator(main, player, i)
 		_dump_cows(main, i)
+		_dump_pond_leaves(main, i)
 		await _shoot("shot_%d" % (i + 1))
 	print("[screenshot] done -> res://screenshots/")
 
@@ -100,6 +101,32 @@ func _dump_cows(main: Node, shot: int) -> void:
 			xform.origin.x + centre.x, xform.origin.y + centre.y,
 			Rect2(top_left, bottom_right - top_left), sprite.animation, sprite.flip_h,
 			body.get("roam_area")])
+
+
+## 荷叶是静态的,但「它到底画在水上还是草地上」只能靠这行去图上数像素:
+## 每片叶子一行,给的是**屏幕矩形**,拿去裁图看里面的颜色,外面一圈应该是水色。
+func _dump_pond_leaves(main: Node, shot: int) -> void:
+	var props := main.get_node_or_null("FarmMap/Props")
+	if props == null or props.get_node_or_null("Props") == null:
+		return
+	var xform := get_viewport().get_canvas_transform()
+	for child in props.get_node("Props").get_children():
+		if not String(child.name).begins_with("tuft_"):
+			continue
+		var node := child as Node2D
+		var sprite := node.get_node_or_null("Sprite") as Sprite2D
+		if sprite == null:
+			continue
+		var local: Rect2 = sprite.get_rect()
+		var matrix: Transform2D = sprite.get_global_transform()
+		var top_left: Vector2 = matrix * local.position
+		var bottom_right: Vector2 = matrix * local.end
+		var world := Rect2(top_left, bottom_right - top_left)
+		var screen_top_left: Vector2 = xform * top_left
+		var screen_bottom_right: Vector2 = xform * bottom_right
+		print("[leaf] shot %d %s world %s screen %s" % [
+			shot, child.name, world,
+			Rect2(screen_top_left, screen_bottom_right - screen_top_left)])
 
 
 ## 把 HUD 各控件的实际矩形和字体度量打出来。

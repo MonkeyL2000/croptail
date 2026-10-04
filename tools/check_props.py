@@ -73,6 +73,8 @@ KIND_RULES = {
     "rock": ("stone", 0.40, ("pink",)),
     "wood": ("wood", 0.50, ("pink", "green")),
     "deco": (None, 0.0, ()),
+    # 荷叶(kind `pond`,只浮在池塘水面上,不撒在草地上)。三张都是绿叶子
+    "pond": ("green", 0.50, ()),
 }
 SHARE_LIMIT = 0.20  # 单一家族占比超过它就当「混进了别的东西」
 

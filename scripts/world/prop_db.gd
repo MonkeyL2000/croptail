@@ -79,12 +79,22 @@ const PROPS := {
 	"bush_leafy": {"sheet": "biome", "rect": Rect2(128, 64, 14, 10), "kind": "deco", "solid": false},
 	"shrub": {"sheet": "biome", "rect": Rect2(112, 68, 13, 9), "kind": "deco", "solid": false},
 	"sprig_b": {"sheet": "biome", "rect": Rect2(137, 74, 7, 5), "kind": "deco", "solid": false},
-	"tuft_a": {"sheet": "biome", "rect": Rect2(97, 18, 8, 5), "kind": "deco", "solid": false},
-	"tuft_b": {"sheet": "biome", "rect": Rect2(84, 23, 8, 5), "kind": "deco", "solid": false},
-	"tuft_c": {"sheet": "biome", "rect": Rect2(102, 25, 8, 5), "kind": "deco", "solid": false},
 	# 麦穗:一根高秆 + 顶上一颗金色的穗,底下是细叶(以前被当成「秋天的树」
 	# 塞进了 tree 那组,还带 solid —— 玩家会撞在一株麦子上)
 	"wheat_plant": {"sheet": "biome", "rect": Rect2(129, 34, 14, 29), "kind": "deco", "solid": false},
+
+	# --- 荷叶:只浮在池塘水面上(kind `pond`)-------------------------------
+	#
+	# 形状是「带缺口的圆叶子」,本来当装饰撒在草地上 —— 用户看到就说
+	# 「荷叶放到草地上了,应该放在池塘里」(2026-10-05 确认就是这三张)。
+	# 所以给它们单独的 kind `pond`:
+	#   - **不在 `SCATTER_KINDS` 里** → 草地撒点不会再撒它们;
+	#   - `farm_props.gd::_place_pond_decor()` 只往**水面的格**上摆(塘内、离岸 ≥1 格);
+	#   - 不 solid:水面本来就进不去,再加碰撞体没意义(自检会钉「荷叶不许 solid」)。
+	# 三张其实是同一个形状的三个副本(各 30 像素),分开摆、当三个变体用。
+	"tuft_a": {"sheet": "biome", "rect": Rect2(97, 18, 8, 5), "kind": "pond", "solid": false},
+	"tuft_b": {"sheet": "biome", "rect": Rect2(84, 23, 8, 5), "kind": "pond", "solid": false},
+	"tuft_c": {"sheet": "biome", "rect": Rect2(102, 25, 8, 5), "kind": "pond", "solid": false},
 
 	# --- 花:全是粉色/黄色,不挡路 ---------------------------------------
 	"flower_big": {"sheet": "biome", "rect": Rect2(33, 33, 13, 14), "kind": "deco", "solid": false},
@@ -122,9 +132,10 @@ const PROPS := {
 
 ## 会被随机撒出去的种类。fence / house 不在里面:它们是手摆的位置
 ## (见 farm_props.gd 的 _place_landmarks),随机撒会撒出断头的围栏。
+## pond 也不在:荷叶浮在水面上,由 `_place_pond_decor()` 单独摆。
 const SCATTER_KINDS := ["tree", "rock", "wood", "deco"]
-## 所有种类:HUD 不算它,但统计输出要能列出围栏和鸡舍
-const KINDS := ["tree", "rock", "wood", "deco", "fence", "house"]
+## 所有种类:统计输出要能列出围栏、鸡舍和荷叶
+const KINDS := ["tree", "rock", "wood", "deco", "pond", "fence", "house"]
 
 
 static func names_of_kind(wanted: String) -> Array[String]:

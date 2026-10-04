@@ -19,7 +19,8 @@
 | 素材对照图 | `python tools/annotate_objects.py` → `docs/art/tools_objects.png`(把代码认定的名字写在斧/镐/围栏/鸡舍的放大图上,人工核对用) |
 | **道具对照图** | `python tools/annotate_props.py` → `docs/art/props_sheet.png`(`prop_db.gd` 里每条 rect 描边 + 编号 + 名字/kind/占地;怀疑「素材放错了」时看这张) |
 | 道具表体检 | `python tools/check_props.py`(每条 rect 是不是**正好一个连通域(+1px 容差)**、kind 和调色板对不对、一条精灵不被两条 rect 切,退出码 0 = 全过) |
-| 道具放大镜 | `python tools/zoom_props.py <名字...>` → 指定的几条道具 8 倍放大 + 编号(`docs/art/leaf_and_log_candidates.png` 就是这么生成的,拿去问用户用) |
+| 道具放大镜 | `python tools/zoom_props.py <名字...>` → 指定的几条道具 8 倍放大 + **全局编号**(`--all` 就是 45 条全上,→ `docs/art/props_numbered.png`,拿去问用户用) |
+| 荷叶截图体检 | `python tools/check_leaf_shots.py <leaf.log>` —— 对着截图数像素,证明荷叶真的画在**水面上**(`[leaf]` 行由 `scenes/dev/screenshot.tscn` 打印) |
 | 连通域清单 | `python tools/sprite_inventory.py <sheet>`(每块精灵的包围盒/像素数/颜色家族/ASCII 缩略图;`--rects` 标出没被任何 rect 盖住的) |
 | 动作版式图 | `python tools/annotate_actions.py` → `docs/art/actions_groups.png`(3 个动作组 x 4 个朝向,人工核对用) |
 | 地形图块重算 | `res://scenes/dev/retile.tscn`(改了地图形状后要跑;先自校验参考图) |
@@ -28,7 +29,7 @@
 | 地图 | `res://scenes/world/farm_map.tscn`(1764 格草 + 3312 格水,72x46 格;草地层被 `tools/carve_ponds.py` 挖了 3 个池塘 = 174 格)。改完形状要重跑 `res://scenes/dev/retile.tscn`,否则新格子的图块是错的 |
 | 池塘 | 3 个椭圆(带 sin 抖动边),**水是露出来的**:删掉草地格就见到下面的水层,岸边不用过渡素材;塘口自动被水墙围上(见 `docs/DECISIONS.md#ponds`) |
 | 地标 | 围栏圈 + 鸡舍 + 2 只鸡 + **牧场 + 2 头牛**,`farm_props.gd::_place_landmarks()` 手摆(`PEN_RECT`/`HOUSE_RECT`/`PASTURE_RECT`),手摆的格子在撒道具前就写进 `reserved`。两个圈都用 `_place_fence(rect)`(上下横排 + 右边一列柱子,**左边留口**) |
-| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~340 个随机道具 + 39 段围栏 + 1 鸡舍,碰撞从贴图 alpha 现算。表里 **45 条**:树 3 / 石头 6 / 木头(含树桩)5 / 花草灌木 26 / 围栏 4 / 鸡舍 1。斧/镐能敲掉它们(tree → +2 木,wood → +1 木,rock → +1 石)。**一条 rect = 一个连通域**,图集里挨着的邻居不许被圈进来(见 `docs/DECISIONS.md#prop-art-rects`) |
+| 道具 | `FarmMap/Props`(`scripts/world/farm_props.gd` + 表 `prop_db.gd`),~340 个随机道具 + 39 段围栏 + 1 鸡舍 + 15 片荷叶,碰撞从贴图 alpha 现算。表里 **45 条**:树 3 / 石头 6 / 木头(含树桩)5 / **荷叶 3(只浮在水面)** / 花草灌木 23 / 围栏 4 / 鸡舍 1。斧/镐能敲掉它们(tree → +2 木,wood → +1 木,rock → +1 石)。**一条 rect = 一个连通域**,图集里挨着的邻居不许被圈进来(见 `docs/DECISIONS.md#prop-art-rects`);**荷叶是 kind `pond`,不撒在草地上**(见 `docs/DECISIONS.md#pond-lily-pads`) |
 | 小路 | `GameTilemap/Path`(`scripts/world/farm_path.gd`)。`Paths.png` 里的横/竖条沿折线拼的**贴花**(75 块 / 47 格):主路走第 15 行(出生点就在路上)→ 东到牧场门、西到池塘边、中间往北进鸡圈。路占的格子不撒道具(`farm_props.gd::_path_cells()`),不生成碰撞体,不动地形(见 `docs/DECISIONS.md#farm-path`) |
 | 工具 | 6 把:锄/水壶/种子/收获(作用在农田)+ 斧/镐(作用在地面物件)。斧/镐的名字是**像素推断**的,见 `docs/DECISIONS.md#gather-tools` 和 `docs/art/tools_objects.png` |
 | TileSet | `res://tilesets/test_tilemap.tres`(旧名沿用;水墙碰撞由 `farm_map.gd` 运行时生成) |
@@ -259,27 +260,50 @@
     (`_prop_free_around()`)。
   - **自检 273 → 287 项**;`check_props.py` → `45/45 干净, 0 problems`。
 
+- [x] **2026-10-05 荷叶搬进池塘**(用户确认:那三片带缺口的圆叶子就是荷叶):
+  - `prop_db.gd` 给它们单独一个 kind **`pond`**(`tuft_a/b/c`,不 solid、**不在 `SCATTER_KINDS` 里**)
+    → 草地撒点从此碰不到它们。种数变成:树 3 / 石头 6 / 木 5 / **荷叶 3** / 花草灌木 **23** /
+    围栏 4 / 鸡舍 1 = 45(总条数不变,只是这三条换了组)。
+  - `farm_props.gd` 新增 `_place_pond_decor()`:池塘格 = 「草格包围盒里的非草格」
+    (和自检同一套算法),按连通域分成 3 堆,每堆挑最多 `POND_LEAVES = 5` 片不挨着的格
+    (互相切比雪夫距离 ≥2),格子必须离岸 ≥1 格(`POND_LEAF_MARGIN`),不然叶子会画出水面
+    盖到岸上 —— 那就又变成「长在草地上」了。共 **15 片**。
+  - 叶子位置在**格中心**(`_place_leaf()` 把 `_make_node()` 的底边对齐改掉,
+    用整数位移):浮在水面上的东西上下居中才像飘着。
+  - **自检 287 → 297 项**,新增 10 条:`there are lily pads on the ponds (15)` /
+    `no lily pad is on the grass` / `keep off the shore` / `not solid` / `not choppable` /
+    `岛上的池塘是分开的池子 (3)` / `every pond has lily pads` / `do not overlap` /
+    `no lily pad is solid` / `lily pads are not part of the land scatter`。
+  - **像素级验证**:截图工具多打 `[leaf]` 行(每片荷叶一行,带屏幕矩形),
+    新工具 `python tools/check_leaf_shots.py C:/ct_out/leaf.log` 对着 3 张截图数颜色:
+    **7 片可见的荷叶每片都画出 30/40 个调色板像素**(调色板直接从图集上取)、
+    所在 16x16 格子里 **226/256 是水色**(剩下 30 就是叶子自己)✓;
+    还有 6 片被 HUD 面板压住、32 片在画面外。
+    —— **教训:世界像素会被 HUD(CanvasLayer)遮住**,第一遍查到 0 个叶子像素,
+    差点当成「叶子没画出来」,其实是那块地方正好是底部消息栏。
+  - 顺手修两个**假失败/报错**:
+    ① 牛的「进场朝向」断言依赖随机目标(我的改动让 `_roll_kind()` 调用次数变了 →
+       牛的种子变了 → 当场随机红),改成**让它朝右走一次**再看 `flip_h`(确定性);
+    ② `selftest.gd` 里两处 `var plot` 遮蔽了脚本级 `@onready var plot`(引擎报 ERROR),改叫 `farm_plot`。
+  - 新增/更新的认素材工具:`tools/zoom_props.py --all` →
+    `docs/art/props_numbered.png`(45 条 8 倍放大 + **全局大编号**,同一张道具在
+    任何一张放大图里编号相同,用户可以只报号)、`docs/art/pond_lily_pads.png`
+    (截图裁出来 4 倍放大的池塘)。
+
 ## Next(按顺序做)
 
-0. **(等用户回话)两个素材问题**(2026-10-05 用户提的第 2 / 第 3 件事):
-   **(a) 「荷叶」到底是哪一格?** 我把工程里每一张图都扫过了(连通域 + 形状),
-   **Basic 包里根本没有荷叶/睡莲的素材**(`find game_source` 没有 lily/lotus/pad 之类的文件,
-   `Water.png` 是一整块纯水)。唯一长得像的只有三片**带缺口的圆叶子** `tuft_a/b/c`
-   (`Basic_Grass_Biom_things.png` 的 (97,18)/(84,23)/(102,25),各 8x5)——
-   在 `docs/art/props_sheet.png` 上是 **#37 / #38 / #39**。两种可能:
-   ① 用户说的就是这三片 → 我把它们从草地搬进池塘(只长在水面上),不再撒在草地上;
-   ② 用户指的是**付费包**里的 `Water Objects.png`(真的荷叶)→ 需要用户明确同意才能拷进来
-      (规则:工程外的素材不能直接用)。
-   另外 #15 `bush_leafy` / #35 `shrub` / #17 `bush_wide` 也是圆的绿块,但都不带缺口。
-   **(b) 「倒下的树」是哪几格?** 我能查到的「躺着的木头」只有
-   #12 `wood_log`(斜躺的木头 + 右上一株绿芽)、#13 `wood_log_big`(粗的斜躺木头)、
-   #14 `wood_pile`(扁平的一堆)、#10 `stump_round` / #11 `stump_small`(小树桩)
-   —— 而三棵树(#1 `tree_big` / #2 `tree_flower` / #3 `tree_small`)逐个查过连通域形状,
-   都是**立着的**(上冠下杆 + 根部的 "????" 展开),代码里也没有任何 rotation/flip
-   (全局搜过 `rotation|flip_h|flip_v|scale`)。所以请用户对着 `docs/art/props_sheet.png`
-   指一下号:如果指的是 #12/#13/#14 这种躺木头,我可以不撒它们(或者只留池塘/伐木场边上);
-   如果指的是别的号,那就是我认错了 rect。
-   **(c) 顺手确认名字**:道具 45 条 + `tools_objects.png`(斧/镐)+ `plants_sheet.png`(作物)。
+0. **(等用户回话)素材确认**:
+   **荷叶已确认并做完了**(见上一条 Done)。还剩:
+   **(a) 「倒下的树」是哪几格?** 用户说「有些树好像倒下了」—— 我能查到的「躺着的木头」
+   只有 #10 `stump_round`、#11 `stump_small`(小树桩)、#12 `wood_log`(斜躺的木头 + 绿芽)、
+   #13 `wood_log_big`(粗的斜躺木头)、#14 `wood_pile`(扁平的一堆);
+   而三棵树 #1 `tree_big` / #2 `tree_flower` / #3 `tree_small` 逐个查过连通域形状,都是**立着的**
+   (上冠下杆 + 根部展开),代码里也没有任何 rotation/flip(全局搜过 `rotation|flip_h|flip_v|scale`)。
+   → 已生成 **`docs/art/props_numbered.png`**(全部 45 条,8 倍放大,**全局大编号**,
+   用户只要对着它报号),并把候选单独放大成 `docs/art/leaf_and_log_candidates.png`。
+   用户报号后的动作:从 `SCATTER_KINDS` 的撒点里去掉那几条(或者只让它们出现在池塘边),
+   改完跑 `check_props.py` + 自检。
+   **(b) 顺手确认名字**:道具 45 条 + `tools_objects.png`(斧/镐)+ `plants_sheet.png`(作物)。
    改名字只动 `prop_db.gd` / `tool_icons.gd`,改完跑 `check_props.py` + 自检。
 1. **把 HUD 的「提示」用完**:斧/镐已经会发提示了(「Chopped a tree (+2 wood).」等),
    农田那四个工具的失败分支还是静默的。在 `farm_cell.gd` (已锄/已种/水够多)
@@ -328,10 +352,12 @@
 - 自检里**合成按键不可靠**(会时灵时不灵),验物理的用例不要依赖它;
   另有「格坐标跨节点混用」的坑 —— 见 `DECISIONS.md#synthetic-input`、`#frame-mixing`、
   `#test-placement-frames`(摆玩家、比贴图都各踩过一次)。
-- ⚠️ **待确认 3**:`prop_db.gd` 里那 45 条道具的**名字**是像素推断的(素材包没有图例)。
-  最没把握的几条:`wheat_plant`(金黄色穗子 + 细叶,原名叫 tree_autumn)、
-  `rock_mossy`(带苔的灰石)、`tuft_a/b/c`(带缺口的圆叶子,是不是**荷叶**?)。
-  对照图:`docs/art/props_sheet.png`(每条 rect 描边 + 编号,下面列出名字/kind/rect)。
+- ✅ **已确认(2026-10-05)**:`tuft_a/b/c` 就是**荷叶**(用户确认),现在是 kind `pond`,
+  只浮在池塘水面上(#15/#16/#17,见 `#pond-lily-pads`)。
+- ⚠️ **待确认 3**:`prop_db.gd` 里那 45 条道具剩下的**名字**是像素推断的(素材包没有图例)。
+  最没把握的:`wheat_plant`(金黄色穗子 + 细叶,原名叫 tree_autumn)、
+  `rock_mossy`(带苔的灰石)、`stump_round`/`stump_small`(两个小树桩)。
+  对照图:`docs/art/props_numbered.png`(全部 45 条 8 倍放大 + 全局大编号)。
   名字只影响可读性,**不影响玩法** —— kind 已经按调色板定过,自检会钉住。
 - ⚠️ **待确认 4(等用户回话):宠物狗素材的来源 / 授权**。文件名
   `lilpuddinpuggums.png` 看着像某份第三方 itch.io 素材(或用户自己/委托画的),
@@ -350,8 +376,18 @@
 ## 最近一次验证
 
 - `run_project {scene: "res://scenes/dev/selftest.tscn"}` + `get_debug_output`
-  → **`=== SELFTEST END: 287 checks, 0 failed ===`**,ERROR 区为空(只有一条已知无害的
-  `NodeFiniteStateMachine: 未知状态 'nonexistent'` 警告)。本轮新增的 `-- path` 12 条:
+  → **`=== SELFTEST END: 297 checks, 0 failed ===`**,ERROR 区为空(只有一条已知无害的
+  `NodeFiniteStateMachine: 未知状态 'nonexistent'` 警告)。本轮新增:
+  - **荷叶 10 条**(`-- ponds` 里):`there are lily pads on the ponds (15)` /
+    `no lily pad is on the grass` / `the lily pads keep off the shore` /
+    `the lily pads are not solid` / `the lily pads are not choppable` /
+    `the island's ponds are separate pools (3)` / `every pond has lily pads` /
+    `the lily pads do not overlap` —— 外加 `-- prop art` 的 `no lily pad is solid`、
+    `lily pads are not part of the land scatter`。
+  - 同时修了两个假失败:`the cow walks right without flipping (the atlas is drawn head-right)`
+    (原来断言的是「进场时 `flip_h` 是 false」,而牛一进场就随机挑目标 —— 种子一变就随机红)、
+    以及 `selftest.gd` 里两处 `var plot` 遮蔽脚本级 `var plot` 的 ERROR。
+  - 上一轮那些回归依然全绿:`-- path` 12 条、牧场/牛 13 条、狗、斧镐、池塘、水墙、地形。
   - `the map has a path decal` / `the path sits inside GameTilemap, after the grass layers`
   - `the path is drawn below the plot and the props`
   - `the path laid down some pieces (75)` / `the path covers some cells (47)`
@@ -363,7 +399,17 @@
     `reaches the pond shore (2,12)`
   - `-- prop art` 新增两条:`every prop rect holds exactly one sprite (45 rects)`、
     `no prop rect cuts its sprite in half`
-  - 上一轮那些回归依然全绿:牧场/牛 13 条、狗、斧镐、池塘、水墙、地形。
+  - 上一轮(加小路那轮)那些回归依然全绿:`-- path` 12 条、牧场/牛 13 条、狗、斧镐、池塘、水墙、地形。
+- **荷叶截图复核**:`scenes/dev/screenshot.tscn` 现在多打 `[leaf]` 行(每片荷叶一行,
+  带世界/屏幕矩形),`python tools/check_leaf_shots.py C:/ct_out/leaf.log`:
+  - **7 片可见的荷叶每片都画出 30/40 个调色板像素**(调色板从图集现取:
+    `(95,122,121)/(110,150,124)/(151,187,142)/(194,224,154)`),
+    所在 16x16 格里 **226/256 是水色**(剩下 30 就是叶子自己)—— 就是「浮在水面上」;
+  - 6 片被 HUD 面板(底部消息栏)遮住、32 片在画面外 —— **都不是问题**。
+  - `docs/art/pond_lily_pads.png` = `screenshots/shot_3.png` 裁出来 4 倍放大,
+    给用户看「荷叶真的在池塘里」;
+  - **教训:世界像素会被 HUD(CanvasLayer)遮住**。第一遍我按屏幕矩形查到 0 个叶子像素,
+    差点当成「叶子没画出来」,其实是那块地方正好是消息栏面板(颜色 `(54,72,72)`)。
 - 截图复核:`run_project {scene: "res://scenes/dev/screenshot.tscn"}` 无 ERROR。
   拿 canvas xform 把每条路的格子换算到屏幕坐标(shot_1 `O=(-8,-41)`)逐格查颜色:
   - 主路(第 15 行、格 x4..32,屏幕 y206..208):**29/29 格命中**,一共 1395 个路面像素;
@@ -373,13 +419,14 @@
   - (第一次我忘了 canvas xform 的偏移,把「世界坐标」当屏幕坐标查,误报「路没画出来」;
     重查才是上面这个结果。)
 - `python tools/check_props.py` → **`45/45 entries look clean`、`0 problems, 0 warnings`**
-  (kind 统计:deco 26 / fence 4 / house 1 / rock 6 / tree 3 / wood 5)。
-- `python tools/annotate_props.py` → `docs/art/props_sheet.png`(1304x1262,45 条重描边,
-  编号变了 —— 用户对着它指号的时候要注意这版)。
+  (kind 统计:**deco 23 / fence 4 / house 1 / pond 3 / rock 6 / tree 3 / wood 5**)。
+- `python tools/annotate_props.py` → `docs/art/props_sheet.png`;
+  `python tools/zoom_props.py --all` → **`docs/art/props_numbered.png`**
+  (2448x3618,45 条 8 倍放大 + **全局大编号 #1..#45** —— 编号在每张放大图上一致,
+   用户只要报号:树 #1/#2/#3、石 #4..#9、木头/树桩 #10..#14、荷叶 #15/#16/#17)。
 - 主场景 `run_project {projectPath: "D:\\godot_projects\\croptail"}`:仅
-  `[farm_props] 340 props (73 tree / 33 rock / 26 wood / 168 deco / 39 fence / 1 house) on 1482 open cells; 1671 collision boxes`
-  + `[farm_map] water walls: 101 collision shapes`,**无 ERROR**
-  (上一轮是 355 个 / 1524 格 —— 小路的 47 格和道具表的 2 条改动把撒点重排了)。
+  `[farm_props] 354 props (70 tree / 33 rock / 26 wood / 170 deco / 15 pond / 39 fence / 1 house) on 1482 open cells; 1644 collision boxes`
+  + `[farm_props] lily pads: ...` + `[farm_map] water walls: 101 collision shapes`,**无 ERROR**。
 - `scripts/dev/retile.gd` → **`REFERENCE CHECK: PASS`**(263 格标准答案 0 差异;本轮没改地图形状)。
 - —— 上一轮(同样是 2026-10-05,加牛+牧场那轮)的验证记录,仍然成立:
   - `the cow sheet is 96x64 (3 cols x 2 rows of 32x32)`

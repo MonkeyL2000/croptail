@@ -1165,9 +1165,9 @@ func _step_physics(frames: int) -> void:
 ## 碰撞墙也跟着漂 —— 玩家会撞到看不见的东西。
 ## 农田占的格子(道具格坐标):plot 的 position 就是左上角那一格。
 func _plot_cell_rect(main: Node2D, props: FarmProps) -> Rect2:
-	var plot: FarmPlot = main.get_node("FarmMap/FarmPlot")
-	var origin := props.to_local_cell(plot.global_position)
-	return Rect2(Vector2(origin), Vector2(plot.columns, plot.rows))
+	var farm_plot: FarmPlot = main.get_node("FarmMap/FarmPlot")
+	var origin := props.to_local_cell(farm_plot.global_position)
+	return Rect2(Vector2(origin), Vector2(farm_plot.columns, farm_plot.rows))
 
 
 ## 小路:`Paths.png` 的横/竖条沿折线拼出来的贴花(`farm_path.gd`)。
@@ -1179,12 +1179,12 @@ func _test_path(main: Node2D, props: FarmProps) -> void:
 		return
 	var nature := main.get_node("FarmMap/GameTilemap/Nature")
 	var tilemap := nature.get_parent()
-	var plot := main.get_node("FarmMap/FarmPlot")
+	var farm_plot := main.get_node("FarmMap/FarmPlot")
 	check("the path sits inside GameTilemap, after the grass layers",
 		path.get_parent() == tilemap and path.get_index() > nature.get_index())
 	check("the path is drawn below the plot and the props",
-		tilemap.get_index() < plot.get_index()
-		and plot.get_index() < main.get_node("FarmMap/Props").get_index())
+		tilemap.get_index() < farm_plot.get_index()
+		and farm_plot.get_index() < main.get_node("FarmMap/Props").get_index())
 	check("the path laid down some pieces (%d)" % path.piece_count(), path.piece_count() >= 4)
 	var cells: Array = path.cells()
 	check("the path covers some cells (%d)" % cells.size(), cells.size() >= 20)
@@ -1359,15 +1359,34 @@ func _test_pasture(props: FarmProps) -> void:
 	await _test_cow_turns(cows)
 
 
-## 往左走要水平翻过来(图集里只有侧身、头朝右的一套)。
-## 把活动范围换成牛左下角一个 4x4 的小矩形,它就只能往左走 —— 然后看 flip_h。
+## 走路方向要和图集朝向对上(图集里只有侧身、头朝右的一套)。
+## 把活动范围换成牛右边/左边一个 4x4 的小矩形,它就只能往那个方向走 —— 然后看 flip_h。
+##
+## 注意:这里原来第一条断言是「刚进场时 flip_h 是 false(头朝右)」,但牛一进场
+## 就随机挑了个活动范围内的目标,目标在左边它当场就翻过来了 —— 种子一变这条就随机红
+## (2026-10-05 把草地上的荷叶搬进池塘,占地不同 → _roll_kind() 调用次数变了
+## → 牛的种子变了 → 这条断言就红了)。改成「让它朝右走一次」,确定性。
 func _test_cow_turns(cows: Array[Node]) -> void:
 	if cows.is_empty():
 		return
 	var cow: Node2D = cows[0]
 	var sprite := cow.get_node("Sprite") as AnimatedSprite2D
 	var saved: Rect2 = cow.get("roam_area")
-	check("the cow starts facing the direction it is drawn in", sprite.flip_h == false)
+
+	# 先往右走:图集就是头朝右画的,所以不该翻
+	var right_from := cow.position.x
+	cow.set("roam_area", Rect2(cow.position + Vector2(40, -2), Vector2(4, 4)))
+	cow.set("_wait", 0.01)
+	var right_walked := false
+	for i in 180:
+		await get_tree().process_frame
+		if cow.position.x > right_from + 6.0:
+			right_walked = true
+			break
+	print("      牛: 向右走了 %.1f px,动画 '%s',flip_h=%s" % [
+		cow.position.x - right_from, sprite.animation, sprite.flip_h])
+	check("the cow walks right without flipping (the atlas is drawn head-right)",
+		right_walked and not sprite.flip_h and sprite.animation == "walk")
 
 	var start_x := cow.position.x
 	cow.set("roam_area", Rect2(cow.position + Vector2(-40, -2), Vector2(4, 4)))
@@ -1640,6 +1659,12 @@ func _test_prop_art() -> void:
 			solid_deco += 1
 	check("no prop sprite is bigger than its footprint cells", oversize == 0)
 	check("no decor prop is solid", solid_deco == 0)
+	var solid_pond := 0
+	for prop_name in PropDB.names_of_kind("pond"):
+		if bool(PropDB.PROPS[prop_name]["solid"]):
+			solid_pond += 1
+	check("no lily pad is solid", solid_pond == 0)
+	check("lily pads are not part of the land scatter", not PropDB.SCATTER_KINDS.has("pond"))
 	var thin: Array[String] = []
 	for kind in PropDB.SCATTER_KINDS:
 		if PropDB.names_of_kind(kind).size() < 2:
@@ -1831,6 +1856,82 @@ func _test_ponds(map: Node, walker: Player, farm: FarmPlot, props: FarmProps) ->
 		if plot_rect.has_point(grass_layer.to_global(grass_layer.map_to_local(hole))):
 			in_plot += 1
 	check("no pond runs through the farm plot", in_plot == 0)
+
+	# --- 荷叶:只许浮在池塘的水面上 ----------------------------------------
+	# 用户的原话:「荷叶的素材放到草地上了,应该放在池塘里」——
+	# 这三种(tuft_a/b/c)本来是和灌木一起撒在草地上的装饰,现在改成 kind `pond`,
+	# 由 `FarmProps._place_pond_decor()` 铺到水面上。这一段把「没长回草地上」钉死。
+	var pond := {}
+	for hole in holes:
+		pond[hole] = true
+	var leaves: Array[Dictionary] = []
+	for entry in props.placed:
+		if entry["kind"] == "pond":
+			leaves.append(entry)
+	check("there are lily pads on the ponds (%d)" % leaves.size(), not leaves.is_empty())
+
+	var off_water := 0
+	var on_shore := 0
+	var solid_leaf := 0
+	var harvestable := 0
+	for entry in leaves:
+		var cell: Vector2i = entry["cell"]
+		if not pond.has(cell):
+			off_water += 1
+		var mid := true
+		for dx in range(-1, 2):
+			for dy in range(-1, 2):
+				if grass.has(cell + Vector2i(dx, dy)):
+					mid = false
+		if not mid:
+			on_shore += 1
+		if props.solid_cells.has(cell):
+			solid_leaf += 1
+		if props.can_use(GameState.Tool.AXE, cell) or props.can_use(GameState.Tool.PICKAXE, cell):
+			harvestable += 1
+	check("no lily pad is on the grass", off_water == 0)
+	check("the lily pads keep off the shore", on_shore == 0)
+	check("the lily pads are not solid", solid_leaf == 0)
+	check("the lily pads are not choppable", harvestable == 0)
+
+	# 池塘按连通域分堆:三片池塘**每片**都得有荷叶,不能全漂在同一个塘里
+	var pools: Array[Array] = []
+	var seen := {}
+	for pool_start in holes:
+		if seen.has(pool_start):
+			continue
+		seen[pool_start] = true
+		var stack: Array[Vector2i] = [pool_start]
+		var pool: Array[Vector2i] = []
+		while not stack.is_empty():
+			var point: Vector2i = stack.pop_back()
+			pool.append(point)
+			for step in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var next: Vector2i = point + step
+				if seen.has(next) or not pond.has(next):
+					continue
+				seen[next] = true
+				stack.append(next)
+		pools.append(pool)
+	check("the island's ponds are separate pools (%d)" % pools.size(), pools.size() >= 3)
+	var bare := 0
+	for pool in pools:
+		var empty := true
+		for entry in leaves:
+			if pool.has(entry["cell"]):
+				empty = false
+		if empty:
+			bare += 1
+	check("every pond has lily pads", bare == 0)
+
+	var crowded := 0
+	for i in leaves.size():
+		for j in range(i + 1, leaves.size()):
+			var first: Vector2i = leaves[i]["cell"]
+			var second: Vector2i = leaves[j]["cell"]
+			if absi(first.x - second.x) <= 1 and absi(first.y - second.y) <= 1:
+				crowded += 1
+	check("the lily pads do not overlap", crowded == 0)
 
 	# 找一个「塘格 + 旁边的草格」的配对(优先左右向:玩家脚下那个碰撞圆在
 	# 身上偏下 6px,竖直推的话两个轴的期望值算法不一样,左右向最干净)
